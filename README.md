@@ -80,6 +80,18 @@ Two things a consumer should know:
   duplicate typedefs when one file includes both. Have yours include this
   one rather than restate it.
 
+## Not here yet
+
+An **Apple IIGS** backend (65816 / GS/OS System 6.x) is the obvious next
+one and is not written. It would be the first little-endian *and* first
+non-68k target in the set, so it needs the byte-swap-on-I/O treatment
+`backends/dos/` already has. `make check-iigs` would gate it from the
+first file.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ## Naming
 
 The symbols still read `wp_status` / `WP_OK`, from RetroWP. Renaming them

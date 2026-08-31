@@ -1,7 +1,8 @@
 # retroplat
 
 The platform seam for vintage-targeting C programs, and one backend per
-machine. Extracted from [RetroWP](../focused) so that more than one
+machine. Extracted from RetroWP, a portable word processor for vintage
+machines, so that more than one
 program can target an Atari ST, an Amiga, a Mac Classic and DOS without
 writing the same five backends again.
 

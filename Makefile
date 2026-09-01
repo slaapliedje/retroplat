@@ -47,7 +47,7 @@ CFLAGS_DOS   = -0 -ml -bt=dos -wx
 # The portable half: no platform calls, no application, nothing to stub.
 PORTABLE_SRC = src/endian.c src/utf8.c
 
-.PHONY: check check-atari check-amiga check-mac check-dos check-all clean
+.PHONY: check check-atari check-amiga check-mac check-dos check-gtk check-all clean
 
 check:
 	@mkdir -p $(BUILD)/host
@@ -73,6 +73,19 @@ check-amiga:
 	done
 	@echo "check-amiga: AmigaOS backend"
 
+# The GTK backend: Cairo for rects, Pango for text. The first backend in
+# this library for a machine that is still made -- and the only one whose
+# twips conversion is exact for the same reason the Mac's is, since Pango
+# counts in points and a twip is 1/20 of one.
+check-gtk:
+	@mkdir -p $(BUILD)/gtk
+	@for f in $(PORTABLE_SRC) backends/gtk/*.c; do \
+		$(CC) $(CFLAGS_HOST) `pkg-config --cflags gtk+-3.0` \
+			-Iinclude -Ibackends/gtk -Ibackends/host \
+			-c $$f -o $(BUILD)/gtk/`basename $$f .c`.o || exit 1; \
+	done
+	@echo "check-gtk: GTK3 + Cairo + Pango backend"
+
 check-mac:
 	@mkdir -p $(BUILD)/mac
 	@for f in $(PORTABLE_SRC) backends/mac/*.c; do \
@@ -94,6 +107,7 @@ check-dos:
 check-all: check
 	@command -v $(ATARICC) >/dev/null 2>&1 && $(MAKE) check-atari || echo "-- no Atari toolchain, skipped"
 	@test -x $(AMIGACC) && $(MAKE) check-amiga || echo "-- no Amiga toolchain, skipped"
+	@pkg-config --exists gtk+-3.0 && $(MAKE) check-gtk || echo "-- no GTK3, skipped"
 	@test -x $(MACCC) && $(MAKE) check-mac || echo "-- no Mac toolchain, skipped"
 	@test -x $(DOSCC) && $(MAKE) check-dos || echo "-- no DOS toolchain, skipped"
 

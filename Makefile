@@ -47,7 +47,7 @@ CFLAGS_DOS   = -0 -ml -bt=dos -wx
 # The portable half: no platform calls, no application, nothing to stub.
 PORTABLE_SRC = src/endian.c src/utf8.c
 
-.PHONY: check check-atari check-amiga check-mac check-dos check-gtk check-all clean
+.PHONY: check check-atari check-amiga check-mac check-dos check-qt check-all clean
 
 check:
 	@mkdir -p $(BUILD)/host
@@ -73,18 +73,24 @@ check-amiga:
 	done
 	@echo "check-amiga: AmigaOS backend"
 
-# The GTK backend: Cairo for rects, Pango for text. The first backend in
-# this library for a machine that is still made -- and the only one whose
-# twips conversion is exact for the same reason the Mac's is, since Pango
-# counts in points and a twip is 1/20 of one.
-check-gtk:
-	@mkdir -p $(BUILD)/gtk
-	@for f in $(PORTABLE_SRC) backends/gtk/*.c; do \
-		$(CC) $(CFLAGS_HOST) `pkg-config --cflags gtk+-3.0` \
-			-Iinclude -Ibackends/gtk -Ibackends/host \
-			-c $$f -o $(BUILD)/gtk/`basename $$f .c`.o || exit 1; \
+# The Qt backend: Cairo's job done by QPainter, Pango's by QFontMetrics.
+# The first backend in this library for a machine that is still made, the
+# only one in C++, and the only one that is a first-class target on Linux,
+# Windows and macOS alike -- which is the whole reason it replaced a GTK3
+# backend that was none of those things on two of the three.
+#
+# Its twips conversion is exact for the same reason the Mac's is: Qt sizes
+# fonts in POINTS and a twip is 1/20 point. Both are built on the printer's
+# point rather than on a screen pixel.
+QTPKG ?= Qt5Widgets
+check-qt:
+	@mkdir -p $(BUILD)/qt
+	@for f in backends/qt/*.cpp; do \
+		$(CXX) -std=c++11 -Wall -Wextra -fPIC `pkg-config --cflags $(QTPKG)` \
+			-Iinclude -Ibackends/qt -Ibackends/host \
+			-c $$f -o $(BUILD)/qt/`basename $$f .cpp`.o || exit 1; \
 	done
-	@echo "check-gtk: GTK3 + Cairo + Pango backend"
+	@echo "check-qt: Qt5 + QPainter backend"
 
 check-mac:
 	@mkdir -p $(BUILD)/mac
@@ -107,7 +113,7 @@ check-dos:
 check-all: check
 	@command -v $(ATARICC) >/dev/null 2>&1 && $(MAKE) check-atari || echo "-- no Atari toolchain, skipped"
 	@test -x $(AMIGACC) && $(MAKE) check-amiga || echo "-- no Amiga toolchain, skipped"
-	@pkg-config --exists gtk+-3.0 && $(MAKE) check-gtk || echo "-- no GTK3, skipped"
+	@pkg-config --exists $(QTPKG) && $(MAKE) check-qt || echo "-- no Qt5, skipped"
 	@test -x $(MACCC) && $(MAKE) check-mac || echo "-- no Mac toolchain, skipped"
 	@test -x $(DOSCC) && $(MAKE) check-dos || echo "-- no DOS toolchain, skipped"
 

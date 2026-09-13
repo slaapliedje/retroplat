@@ -229,7 +229,7 @@ wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     }
 
     memset(&src_mfdb, 0, sizeof(src_mfdb));
-    src_mfdb.fd_addr = planebuf;
+    MFDB_SET_ADDR(src_mfdb, planebuf);
     src_mfdb.fd_w = (short)src_width_px;
     src_mfdb.fd_h = (short)src_height_px;
     src_mfdb.fd_wdwidth = (short)wdwidth;

@@ -4,24 +4,7 @@
 #include <gem.h>
 #include "types.h"
 
-/* MFDB_SET_ADDR -- assign a buffer to an MFDB's fd_addr.
- *
- * A macro because the field is not the same TYPE on both GEMs this backend
- * builds for. The ST's bindings declare it `void *`, which on a 68000 is
- * the 32 bits the VDI's layout wants. gem4xe (~/dev/gem4xe) runs on a
- * 65816 whose small data model makes `void *` SIXTEEN bits, and an MFDB
- * whose first field shrank would shift every field after it and break
- * every application that builds one by hand -- so it declares fd_addr as
- * a uint32_t and says so. Both are right for their machine.
- *
- * Detected by gem4xe's own include guard rather than by a build flag,
- * because the thing that actually differs is which gem.h is on the
- * include path. */
-#ifdef GEM4XE_APP_GEM_H
-#  define MFDB_SET_ADDR(m, p)  ((m).fd_addr = (uint32_t)(p))
-#else
-#  define MFDB_SET_ADDR(m, p)  ((m).fd_addr = (void *)(p))
-#endif
+#include "gemcompat.h"   /* MFDB_SET_ADDR, OB_SPEC_*: the two GEMs' differences */
 
 /* Private to platform/atari -- shared between metrics_atari.c (owns the
    twips<->pixel conversion and the lazily-opened metrics-only VDI

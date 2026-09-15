@@ -1,6 +1,7 @@
 #include <string.h>
 #include <gem.h>
 #include "platform.h"
+#include "gemcompat.h"   /* OB_SPEC_*: ob_spec is a union on one GEM and a LONG on the other */
 
 /* Real GEM form_do()-based "choose one of N" dialog (M8.5), replacing
    the M8.5-Phase-6 placeholder that always picked the default option.
@@ -66,7 +67,7 @@ static void set_obj(short index, short next, short head, short tail,
     g_dialog_tree[index].ob_type = type;
     g_dialog_tree[index].ob_flags = flags;
     g_dialog_tree[index].ob_state = state;
-    g_dialog_tree[index].ob_spec.free_string = text;
+    OB_SPEC_SET_STRING(g_dialog_tree[index], text);
     g_dialog_tree[index].ob_x = x;
     g_dialog_tree[index].ob_y = y;
     g_dialog_tree[index].ob_width = w;
@@ -158,7 +159,7 @@ static wp_status build_dialog_tree(const u8 *title_utf8, u32 title_len,
        is a packed value and not a pointer at all -- see
        WP_DIALOG_BOX_SPEC. set_obj keeps its char* signature since every
        OTHER object in this tree really does store a string there. */
-    g_dialog_tree[root].ob_spec.index = WP_DIALOG_BOX_SPEC;
+    OB_SPEC_SET_INDEX(g_dialog_tree[root], WP_DIALOG_BOX_SPEC);
 
     y = (short)(char_h / 2);
     set_obj(title_obj, first_option, -1, -1, G_STRING, OF_NONE, OS_NORMAL,
@@ -384,8 +385,8 @@ wp_bool wp_atari_dialog_selfcheck(void)
     /* 3. The root box carries a real packed color word, not a pointer
           and not zero -- an opaque, solid-filled interior, so the dialog
           erases the document behind it. */
-    if (g_dialog_tree[0].ob_spec.index != WP_DIALOG_BOX_SPEC) return WP_FALSE;
-    if ((g_dialog_tree[0].ob_spec.index & 0x0080L) == 0) return WP_FALSE; /* opaque */
+    if (OB_SPEC_INDEX(g_dialog_tree[0]) != WP_DIALOG_BOX_SPEC) return WP_FALSE;
+    if ((OB_SPEC_INDEX(g_dialog_tree[0]) & 0x0080L) == 0) return WP_FALSE; /* opaque */
 
     /* 4. OK and Cancel do not overlap, and both sit inside the box.
           Caught on a real screenshot, not here, because nothing was

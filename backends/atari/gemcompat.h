@@ -178,24 +178,10 @@
 typedef WORD MFORM;
 #endif
 
-/* wind_create_grect / wind_open_grect -- two gemlib wrappers gem4xe has
- * not got yet.
- *
- * gem4xe already carries most of this family (wind_get_grect,
- * wind_set_grect, wind_calc_grect, form_center_grect, objc_draw_grect)
- * for exactly the reason its gem.h gives: they are the difference between
- * a real ST application compiling and not.  Create and open are the two
- * it stopped short of, and both are one line over the call it does have.
- *
- * They are here rather than in gem4xe's gemlib.c only so that RetroWP
- * builds against an unmodified kit.  Upstream is the better home for
- * them, beside their five siblings. */
-#ifdef GEM4XE_APP_GEM_H
-#  define wind_create_grect(kind, r) \
-       wind_create((kind), (r)->g_x, (r)->g_y, (r)->g_w, (r)->g_h)
-#  define wind_open_grect(handle, r) \
-       wind_open((handle), (r)->g_x, (r)->g_y, (r)->g_w, (r)->g_h)
-#endif
+/* wind_create_grect and wind_open_grect were defined here as macros while
+ * gem4xe's gem.h carried the rest of that family and not those two.  It
+ * declares them now, beside their five siblings, which is the better home
+ * -- so the macros are gone rather than shadowing real functions. */
 
 /* WP_EVNT_MULTI -- one wait, two spellings.
  *

@@ -185,28 +185,35 @@ typedef WORD MFORM;
 
 /* WP_EVNT_MULTI -- one wait, two spellings.
  *
- * The AES call is the same underneath; the bindings disagree about how to
- * hand it the two mouse rectangles and the timer.  gemlib takes ten loose
- * words and one LONG; gem4xe takes two MOBLK pointers and the timer
- * already split into its low and high words.  Neither is a different
- * event loop, so the call site spells it once and this decides which
- * binding it lands on.
+ * The AES call is the same underneath, and since gem4xe's kit grew
+ * evnt_multi in the ST's own shape -- the Compendium's twenty-three
+ * arguments, both mouse rectangles flat -- only one thing still differs:
+ * gemlib joins the timer into a LONG, and the AES has always taken it as
+ * two words.  So the seam here is this macro and nothing else.  The
+ * adapter that used to build two MOBLKs is gone, and gemcompat_gem4xe.c
+ * with it.
+ *
+ * `tm` is expanded twice, which a macro should be shy about.  It is left
+ * so because the only caller in this tree passes a constant, and because
+ * the alternative is the function just deleted; a caller wanting a
+ * computed timeout should put it in a variable first.
+ *
+ * The cast to unsigned long before shifting is the point of that line: a
+ * LONG is signed and right-shifting a negative one is
+ * implementation-defined (C89 6.3.7).  Nothing here passes a negative
+ * timeout, which is exactly why it must not be left to chance.
  *
  * Fixed arity rather than a variadic macro: this tree is C89, which has
  * no __VA_ARGS__. */
 #ifdef GEM4XE_APP_GEM_H
-WORD rp_evnt_multi_st(UWORD flags, WORD bclk, UWORD bmsk, UWORD bst,
-                      WORD m1f, WORD m1x, WORD m1y, WORD m1w, WORD m1h,
-                      WORD m2f, WORD m2x, WORD m2y, WORD m2w, WORD m2h,
-                      WORD *msg, LONG timer,
-                      WORD *mx, WORD *my, WORD *mb,
-                      WORD *ks, WORD *kr, WORD *br);
 #  define WP_EVNT_MULTI(fl,bc,bm,bs, a1,a2,a3,a4,a5, b1,b2,b3,b4,b5, \
                         msg,tm, mx,my,mb,ks,kr,br)                    \
-       rp_evnt_multi_st((fl),(bc),(bm),(bs),                          \
-                        (a1),(a2),(a3),(a4),(a5),                     \
-                        (b1),(b2),(b3),(b4),(b5), (msg),(tm),         \
-                        (mx),(my),(mb),(ks),(kr),(br))
+       evnt_multi((fl),(bc),(bm),(bs),                                \
+                  (a1),(a2),(a3),(a4),(a5),                           \
+                  (b1),(b2),(b3),(b4),(b5), (msg),                    \
+                  (WORD)((unsigned long)(tm) & 0xFFFFuL),             \
+                  (WORD)(((unsigned long)(tm) >> 16) & 0xFFFFuL),     \
+                  (mx),(my),(mb),(ks),(kr),(br))
 #else
 #  define WP_EVNT_MULTI(fl,bc,bm,bs, a1,a2,a3,a4,a5, b1,b2,b3,b4,b5, \
                         msg,tm, mx,my,mb,ks,kr,br)                    \

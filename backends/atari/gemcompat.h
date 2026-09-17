@@ -48,54 +48,38 @@
 #  define MFDB_SET_ADDR(m, p)  ((m).fd_addr = (void *)(p))
 #endif
 
-/* OBJECT.ob_spec -- a pointer for some object types and a packed word for
- * others, which is why it is 32 bits of nothing in particular.
+/* OBJECT.ob_spec -- one union now, in both GEMs.
  *
- * mintlib declares it a UNION, so ST source says which half it means by
- * naming a member: `.free_string` for the char * a G_STRING, G_BUTTON or
- * G_TITLE carries, `.index` for the colour-and-border word a G_BOX,
- * G_IBOX or G_BOXCHAR carries (Compendium p.6.18). gem4xe declares it a
- * bare LONG, which is what the ST's OWN aes.h has and what gem4xe's AES
- * reads -- src/aes/objc.c takes its low 16 bits, everything the AES
- * reaches being in bank $00. Neither is wrong, and making gem4xe's a
- * union to suit one binding library would change a published ABI.
+ * This was the largest entry in this header.  mintlib declares ob_spec as
+ * a UNION, so ST source says which half it means by naming a member:
+ * `.free_string` for the char * a G_STRING, G_BUTTON or G_TITLE carries,
+ * `.index` for the colour-and-border word a G_BOX, G_IBOX or G_BOXCHAR
+ * carries (Compendium p.6.18).  gem4xe declared a bare LONG -- which is
+ * what the ST's own aes.h has -- so every site needed two spellings and
+ * the gem4xe one had to widen the LONG back to the far pointer it was
+ * made from, by hand, in both directions.
  *
- * The string form stores the WHOLE address, not its low word: a string
- * that is not in bank $00 is the caller's bug, and gem4xe counts a far
- * address (src/sys/abi.c, near_of) rather than following it -- which it
- * cannot do if the library has already thrown the high word away. */
-#ifdef GEM4XE_APP_GEM_H
-#  define OB_SPEC_SET_STRING(o, p) ((o).ob_spec = (LONG)(uint32_t)(char FAR *)(p))
-#  define OB_SPEC_SET_INDEX(o, v)  ((o).ob_spec = (LONG)(v))
-#  define OB_SPEC_INDEX(o)         ((long)(o).ob_spec)
-#else
-#  define OB_SPEC_SET_STRING(o, p) ((o).ob_spec.free_string = (p))
-#  define OB_SPEC_SET_INDEX(o, v)  ((o).ob_spec.index = (v))
-#  define OB_SPEC_INDEX(o)         ((long)(o).ob_spec.index)
-#endif
-
-/* OB_SPEC_STRING / OB_SPEC_IS_STRING -- reading back what was set.
+ * Since gem4xe 0b3b5b3 its gem.h declares the same union with the same
+ * member names, and measured its layout in both data models rather than
+ * assuming it: an OBJECT is 24 bytes with ob_spec at offset 12 either
+ * way, a small-model pointer landing on the low word where the near
+ * address is, a large-model one filling the long with the bank in byte 2.
  *
- * The setters above are only half the seam: the shell's self-checks read
- * a title back to prove it is the string they installed, and one site
- * (the accessory-slot check) indexes into it.  On the ST that is a plain
- * char * out of the union.  On gem4xe it is the LONG widened back to the
- * far pointer it was made from -- the same conversion the setter did,
- * run the other way, so a pointer that went in comes back equal to
- * itself.
+ * So these five are one definition each now, and this header no longer
+ * has an opinion about ob_spec -- it only gives the operations names, so
+ * the shell reads as intent rather than as union members.  The macros are
+ * kept rather than deleted because 79 call sites spell them, and because
+ * naming the operation is worth something even when both branches agree.
  *
- * The comparison has its own macro rather than being spelled
- * `OB_SPEC_STRING(o) == (p)` at each site because the ST's char * and
- * gem4xe's char FAR * are not the same type, and only the macro knows
- * which one the operand has to be widened to. */
-#ifdef GEM4XE_APP_GEM_H
-#  define OB_SPEC_STRING(o)        ((const char FAR *)(uint32_t)(o).ob_spec)
-#  define OB_SPEC_IS_STRING(o, p)  \
-       ((o).ob_spec == (LONG)(uint32_t)(const char FAR *)(p))
-#else
-#  define OB_SPEC_STRING(o)        ((const char *)(o).ob_spec.free_string)
-#  define OB_SPEC_IS_STRING(o, p)  ((o).ob_spec.free_string == (p))
-#endif
+ * The far/near question does not arise in the assignment: under
+ * --data-model=large a `char *` IS far, and a `__near` string converts to
+ * it by taking bank $00, which is where the AES reads these anyway.
+ * Checked with the compiler, not by reasoning about it. */
+#define OB_SPEC_SET_STRING(o, p)  ((o).ob_spec.free_string = (p))
+#define OB_SPEC_SET_INDEX(o, v)   ((o).ob_spec.index = (v))
+#define OB_SPEC_INDEX(o)          ((long)(o).ob_spec.index)
+#define OB_SPEC_STRING(o)         ((const char *)(o).ob_spec.free_string)
+#define OB_SPEC_IS_STRING(o, p)   ((o).ob_spec.free_string == (p))
 
 /* FA_ERROR / FA_INFO -- the icon prefix of a form_alert string.
  *
@@ -146,17 +130,13 @@
 
 /* OB_SPEC_ZERO -- the ob_spec slot of a static OBJECT initializer.
  *
- * `{0}` is what the ST needs (ob_spec is a union there, and a union's
- * initializer is brace-enclosed) and it is valid C89 for gem4xe's bare
- * LONG too -- C89 6.5.7 permits braces around a scalar initializer.
- * Calypsi does not implement that permission: it stops with "internal
- * error: unhandled initializer", which is a limit rather than a
- * disagreement, so the brace is spelled only where it is required. */
-#ifdef GEM4XE_APP_GEM_H
-#  define OB_SPEC_ZERO 0
-#else
-#  define OB_SPEC_ZERO {0}
-#endif
+ * `{0}` in both GEMs now, ob_spec being a union in both: a union's
+ * initializer is brace-enclosed.  This used to be `0` on gem4xe, where
+ * ob_spec was a bare LONG and Calypsi refused the braces C89 6.5.7 allows
+ * around a scalar ("internal error: unhandled initializer").  That limit
+ * is unchanged; it simply no longer applies, and the braced form was
+ * compiled against the new header to be sure. */
+#define OB_SPEC_ZERO {0}
 
 /* The AES's small change: flag values that gemlib names and gem4xe, which
  * declares only the calls, leaves as the numbers the AES documents.  All

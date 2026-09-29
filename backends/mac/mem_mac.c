@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include <stdlib.h>
 #include "platform.h"
 #include "mem_mac.h"

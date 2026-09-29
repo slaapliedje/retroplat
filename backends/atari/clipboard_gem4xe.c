@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /* clipboard_gem4xe.c -- plat_clipboard_* on gem4xe.
  *
  * The convention is classic GEM's and is unchanged from the ST

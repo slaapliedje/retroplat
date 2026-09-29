@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <dos/dos.h>

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "platform.h"
 
 /* Plain DOS is single-tasking with no OS-level clipboard service to

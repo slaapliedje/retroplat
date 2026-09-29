@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef RP_WIN32_METRICS_INTERNAL_H
 #define RP_WIN32_METRICS_INTERNAL_H
 

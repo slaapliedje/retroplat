@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef WP_AMIGA_METRICS_INTERNAL_H
 #define WP_AMIGA_METRICS_INTERNAL_H
 

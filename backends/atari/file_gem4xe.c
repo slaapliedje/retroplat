@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /* file_gem4xe.c -- plat_file on GEMDOS, for gem4xe.
  *
  * The ST's half of this seam (file_atari.c) is stdio: mintlib's works

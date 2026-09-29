@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /* mem_gem4xe.c -- mem_alloc/mem_free/mem_realloc on gem4xe.
  *
  * The ST's half of this seam (mem_atari.c) is mintlib's malloc, which

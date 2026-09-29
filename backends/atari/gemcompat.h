@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef RP_GEMCOMPAT_H
 #define RP_GEMCOMPAT_H
 

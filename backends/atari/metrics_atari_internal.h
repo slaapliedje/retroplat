@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef WP_ATARI_METRICS_INTERNAL_H
 #define WP_ATARI_METRICS_INTERNAL_H
 

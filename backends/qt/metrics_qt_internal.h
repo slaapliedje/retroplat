@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef RP_QT_METRICS_INTERNAL_H
 #define RP_QT_METRICS_INTERNAL_H
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include <exec/types.h>
 #include <libraries/iffparse.h>
 #include <datatypes/textclass.h>

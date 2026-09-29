@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "endian.h"
 
 u16 be_read16(const u8 *p)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef WP_PLATFORM_H
 #define WP_PLATFORM_H
 

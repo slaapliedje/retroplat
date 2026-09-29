@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "metrics_qt_internal.h"
 
 extern "C" {

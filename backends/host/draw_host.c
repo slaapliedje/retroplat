@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "platform.h"
 
 /* No real drawing surface on the host backend -- glyph draw is a no-op so

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "utf8.h"
 
 u32 utf8_seq_len(u8 lead)

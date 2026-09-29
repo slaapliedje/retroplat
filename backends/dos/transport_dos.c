@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include <stddef.h>
 #include <string.h>
 #include <i86.h>

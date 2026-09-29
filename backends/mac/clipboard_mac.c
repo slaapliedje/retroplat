@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /* No Scrap.h exists in Retro68's header set at all (unlike Files.h/
    Processes.h, which exist as thin wrappers) -- Memory.h resolves to
    the same master Multiverse.h header and already declares

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "platform.h"
 
 /* Not a real OS clipboard -- an in-process buffer, sufficient for host

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef WP_TYPES_H
 #define WP_TYPES_H
 

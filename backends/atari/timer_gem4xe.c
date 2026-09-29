@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /* timer_gem4xe.c -- plat_ticks_ms / plat_sleep_ms on gem4xe.
  *
  * The ST's half of this seam (timer_atari.c) reads mintlib's clock(), and

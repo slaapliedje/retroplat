@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /* transport_gem4xe.c -- the offload seam on gem4xe: no device, and said so.
  *
  * The ST reaches a gateway over the modem port (transport_atari.c, Rsconf

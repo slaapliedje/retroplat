@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef WP_METRICS_HOST_H
 #define WP_METRICS_HOST_H
 

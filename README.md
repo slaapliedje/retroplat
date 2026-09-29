@@ -100,3 +100,17 @@ to `plat_`/`PLAT_` is mechanical and touches every file in every
 consumer, so it is deliberately deferred rather than mixed into the move
 — new additions to the seam use `PLAT_` from the start, as
 `PLAT_STYLE_*` already does.
+
+## Licence
+
+**LGPL-2.1-or-later.** `COPYING.LIB` carries the text, and every source file
+carries `SPDX-License-Identifier: LGPL-2.1-or-later`.
+
+The library half of the choice is the point: link retroplat from anything you
+like, including a program under terms of your own — what the licence asks is
+that changes **to retroplat itself** stay available, and that a program you hand
+someone leaves them able to relink it against a modified copy (section 6).
+
+It is the same licence gem4xe's application kit and cflib use, so a program built
+from all three — as the Atari 8-bit build of GACS is — answers to one set of
+library terms rather than three.

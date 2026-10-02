@@ -32,9 +32,11 @@ byte-identical to the linker's own binary.
   need `RELOC`/`INTERSEG` and a real linker pass; this is not that.
 - ProDOS metadata is not the file's business: whatever writes the OMF to
   a disk image must also set filetype **$B3 (S16)**, auxtype **$0000**.
-- **Not verified on hardware or in an emulator.** No working IIGS romset
-  is available here (all four MAME sets verify bad), so the chain has
-  never been run under GS/OS. `--selftest` checks the bytes against an
+- **Not verified on hardware or in an emulator.** When this was written no
+  working IIGS romset was available here, so the chain has never been run
+  under GS/OS. (The romset is complete now and MAME's `apple2gs` boots
+  GS/OS 6.0.4 headless, but nothing has been run through it yet. ORCA/C
+  was chosen over this route in the end -- see the top-level README.) `--selftest` checks the bytes against an
   independent re-parser — deliberately not sharing code with the writer,
   so a mistake cannot hide behind itself — and confirms malformed files
   are rejected. Read a passing selftest as "well-formed", never as
@@ -48,3 +50,12 @@ code model links. A real map wants the program in its own bank with a
 bank-aware code/data model, which is the next piece of SDK work — the
 first attempt at `$02/0000` failed exactly there, with `value 131645 is
 out of range, allowed range is -32768 to 65535`.
+
+## iigs/orca_check.sh
+
+What `make check-iigs` runs: compiles C files with ORCA/C under
+`#pragma lint -1`, after first requiring ORCA to report a fixture with a
+known lint error -- because "0 errors found" is also what a pipeline that
+never compiled anything prints. Stages headers and sources flat and
+compiles from inside the stage (see the README for why). Run so far only
+with Golden Gate's Windows build under Wine.

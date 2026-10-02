@@ -141,10 +141,6 @@ accepts C89 -- prototypes, `const` -- or only K&R C is the open question,
 and the first thing to answer. Its backend would be this library's first
 terminal (tty) backend rather than a GUI one. The CPU is big-endian.
 
-## License
-
-MIT — see [LICENSE](LICENSE).
-
 ## Naming
 
 The symbols still read `wp_status` / `WP_OK`, from RetroWP. Renaming them

@@ -1,5 +1,5 @@
 # retroplat -- the portable platform seam, and one backend per vintage
-# machine. Extracted from RetroWP (~/dev/focused) per its
+# machine. Extracted from RetroWP (~/dev/retrowp) per its
 # docs/platform-extraction.md.
 #
 # There is nothing to link here. A platform layer has no main(), so the
@@ -11,9 +11,11 @@
 #
 #   make check          seam + host backend, native
 #   make check-atari    m68k-atari-mint-gcc
+#   make check-gem4xe   Calypsi cc65816 + gem4xe's kit (Atari 8-bit)
 #   make check-amiga    m68k-amigaos-gcc
 #   make check-mac      Retro68's m68k-apple-macos-gcc
 #   make check-dos      Open Watcom wcc
+#   make check-iigs     ORCA/C via Golden Gate (portable half only, so far)
 #   make check-all      every toolchain that is installed
 #
 # Always recompiles: this is a gate, and a gate that can be stale is not
@@ -47,7 +49,24 @@ CFLAGS_DOS   = -0 -ml -bt=dos -wx
 # The portable half: no platform calls, no application, nothing to stub.
 PORTABLE_SRC = src/endian.c src/utf8.c
 
-.PHONY: check check-atari check-amiga check-mac check-dos check-qt check-all clean
+# Atari 8-bit, through gem4xe -- GEM for a 65816-accelerated XL/XE. The
+# ST's VDI-facing files (dialog, draw, metrics) compile unchanged against
+# gem4xe's GEM; the rest of the ST backend speaks GEMDOS/BIOS directly, so
+# those five have *_gem4xe.c siblings.
+CALYPSI     ?= $(HOME)/dev/toolchains/calypsi-65816
+G4XCC       ?= $(CALYPSI)/bin/cc65816
+GEM4XE_SDK  ?= $(HOME)/dev/gem4xe/build/gem4xe-sdk
+CFLAGS_G4X   = --code-model=large --data-model=large -O2
+GEM4XE_ONLY  = $(wildcard backends/atari/*_gem4xe.c)
+GEM4XE_SRC   = $(PORTABLE_SRC) backends/atari/dialog_atari.c \
+               backends/atari/draw_atari.c backends/atari/metrics_atari.c \
+               $(GEM4XE_ONLY)
+
+# Apple IIGS. ORCA/C through Golden Gate's iix; on Linux, its Windows
+# build under Wine, wrapped by a script with an iix-clean beside it.
+IIX ?= $(HOME)/dev/gem4xe/ref/iix
+
+.PHONY: check check-atari check-gem4xe check-amiga check-mac check-dos check-iigs check-qt check-all clean
 
 check:
 	@mkdir -p $(BUILD)/host
@@ -64,6 +83,26 @@ check-atari:
 			-c $$f -o $(BUILD)/atari/`basename $$f .c`.o || exit 1; \
 	done
 	@echo "check-atari: GEM / VDI / TOS backend"
+
+# Every *_gem4xe.c is wrapped in #ifdef GEM4XE_APP_GEM_H, which only
+# gem4xe's gem.h defines -- so check-atari above compiles each one to an
+# EMPTY object, and passing says nothing about them. This is their gate.
+# The same guard is also how this one could pass while checking nothing:
+# a kit that stopped defining the macro would empty every file without an
+# error. So each *_gem4xe object must define at least one global function.
+check-gem4xe:
+	@mkdir -p $(BUILD)/gem4xe
+	@for f in $(GEM4XE_SRC); do \
+		$(G4XCC) $(CFLAGS_G4X) -Iinclude -Ibackends/atari -I$(GEM4XE_SDK)/include \
+			$$f -o $(BUILD)/gem4xe/`basename $$f .c`.o || exit 1; \
+	done
+	@for f in $(GEM4XE_ONLY); do \
+		o=$(BUILD)/gem4xe/`basename $$f .c`.o; \
+		nm --defined-only $$o | grep -q ' T ' || { \
+			echo "check-gem4xe: FAIL -- $$o defines nothing: is GEM4XE_APP_GEM_H still defined by gem.h?"; \
+			exit 1; }; \
+	done
+	@echo "check-gem4xe: Atari 8-bit (gem4xe) backend, `echo $(GEM4XE_ONLY) | wc -w` gem4xe-only files define code"
 
 check-amiga:
 	@mkdir -p $(BUILD)/amiga
@@ -109,13 +148,21 @@ check-dos:
 	done
 	@echo "check-dos: DOS text-mode backend"
 
+# No IIGS backend yet: this gates the portable half under ORCA/C (16-bit
+# int, 32-bit pointers) so backends/iigs/ is gated from its first file.
+# tools/iigs/orca_check.sh says why it stages flat and runs a control.
+check-iigs:
+	@tools/iigs/orca_check.sh $(IIX) $(PORTABLE_SRC) $(wildcard backends/iigs/*.c)
+
 # An absent cross-toolchain is not a failed gate.
 check-all: check
 	@command -v $(ATARICC) >/dev/null 2>&1 && $(MAKE) check-atari || echo "-- no Atari toolchain, skipped"
+	@test -x $(G4XCC) && test -f $(GEM4XE_SDK)/include/gem.h && $(MAKE) check-gem4xe || echo "-- no Calypsi or gem4xe kit, skipped"
 	@test -x $(AMIGACC) && $(MAKE) check-amiga || echo "-- no Amiga toolchain, skipped"
 	@pkg-config --exists $(QTPKG) && $(MAKE) check-qt || echo "-- no Qt5, skipped"
 	@test -x $(MACCC) && $(MAKE) check-mac || echo "-- no Mac toolchain, skipped"
 	@test -x $(DOSCC) && $(MAKE) check-dos || echo "-- no DOS toolchain, skipped"
+	@test -x $(IIX) && $(MAKE) check-iigs || echo "-- no ORCA/C (Golden Gate iix), skipped"
 
 clean:
 	rm -rf $(BUILD)

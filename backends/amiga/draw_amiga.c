@@ -92,6 +92,29 @@ wp_status plat_native_to_utf8(const u8 *native, u32 len,
    closer by the same luminance threshold -- callers (app_shell.c) have
    only ever asked for black text on the theme's normal background so
    far, same scope note draw_atari.c's own version carries. */
+/*
+   Pure white and pure black stay the theme's BACKGROUNDPEN and TEXTPEN
+   whatever the depth -- the page and its text look as the user's
+   Workbench says. Anything else, on a screen of 16 colors or more under
+   graphics.library V39+, is the nearest pen the screen already has
+   (FindColor: nothing allocated, nothing to release), which is what lets
+   a grey be grey; shallower screens, and Kickstart 2.x, keep the
+   brightness rule. */
+static UBYTE rgb_to_pen_on(const amiga_gc *agc, u8 r, u8 g, u8 b)
+{
+    struct DrawInfo *dri = agc->dri;
+    u32 luminance = (u32)r + (u32)g + (u32)b;
+
+    if (luminance != 0 && luminance != 765 && agc->screen != NULL &&
+        agc->screen->BitMap.Depth >= 4 && GfxBase->LibNode.lib_Version >= 39) {
+        LONG pen = FindColor(agc->screen->ViewPort.ColorMap,
+                             (ULONG)r * 0x01010101UL, (ULONG)g * 0x01010101UL,
+                             (ULONG)b * 0x01010101UL, -1);
+        if (pen >= 0) return (UBYTE)pen;
+    }
+    return (UBYTE)dri->dri_Pens[(luminance < 384) ? TEXTPEN : BACKGROUNDPEN];
+}
+
 static UBYTE rgb_to_pen(struct DrawInfo *dri, u8 r, u8 g, u8 b)
 {
     u32 luminance = (u32)r + (u32)g + (u32)b;
@@ -136,7 +159,7 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
 
     if (agc == NULL) return WP_ERR;
 
-    SetAPen(agc->rp, rgb_to_pen(agc->dri, r, g, b));
+    SetAPen(agc->rp, rgb_to_pen_on(agc, r, g, b));
     RectFill(agc->rp, (LONG)x, (LONG)y, (LONG)(x + w - 1), (LONG)(y + h - 1));
     return WP_OK;
 }

@@ -67,15 +67,11 @@ wp_status plat_native_to_utf8(const u8 *native, u32 len,
     return WP_OK;
 }
 
-/* r,g,b -> nearest ST palette index. Only ever asked to draw black text
-   on a white background at this milestone, so a simple luminance
-   threshold against the two fixed low-res-palette entries (G_WHITE=0,
-   G_BLACK=1) is enough; a real nearest-color search over the full
-   16-entry palette is unneeded until color text is a real feature. */
+/* r,g,b -> a VDI pen: the nearest in the real palette on a screen of
+   16 colors or more, white or black below that (atari_nearest_pen). */
 static short rgb_to_vdi_color(u8 r, u8 g, u8 b)
 {
-    u32 luminance = (u32)r + (u32)g + (u32)b;
-    return (luminance < 384) ? G_BLACK : G_WHITE;
+    return atari_nearest_pen(r, g, b);
 }
 
 wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
@@ -196,6 +192,7 @@ wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
         vs_color(agc->vdi, (short)(i + 2), rgb);
         pen_for[i] = (u8)(i + 2);
     }
+    atari_palette_taken(2, (short)palette_count);
 
     wdwidth = (src_width_px + 15) / 16;
     row_words = (u32)wdwidth * (u32)nplanes;

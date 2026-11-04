@@ -46,6 +46,18 @@ i32 atari_px_to_twips_y(i32 px);
    many VDI palette registers/bitplanes are real). */
 i32 atari_screen_max_colors(void);
 
+/* The VDI pen nearest r/g/b in the screen's real palette (vq_color),
+   for a screen of 16 colors or more; below that, white or black by
+   brightness, the rule every fill used before -- ST Medium's four are
+   white, red, green and black, and "nearest" to a grey there is a
+   colour. Pens an image has reprogrammed (atari_palette_taken) are
+   never chosen: they change with the next image. */
+short atari_nearest_pen(u8 r, u8 g, u8 b);
+
+/* plat_draw_image reprogrammed pens [first, first+count): they are the
+   picture's from now on, and the palette is read afresh. */
+void atari_palette_taken(short first, short count);
+
 /* plat_font's real backing type -- shared here (not private to
    metrics_atari.c) because VDI text attributes are per-VDI-HANDLE
    state, not global: a size/style selected on g_metrics_vdi (via

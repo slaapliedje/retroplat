@@ -375,6 +375,61 @@ i32 atari_screen_max_colors(void)
     return g_num_colors;
 }
 
+/* The palette, in VDI's 0..1000 per gun, read on first use; pens from
+   2 up to g_taken_hi are an image's. A few recent answers are kept: a
+   ruler bar repaint asks for the same handful of greys hundreds of
+   times, and each fresh answer is a scan of up to 256 pens. */
+#define ATARI_PAL_MAX 256
+static short g_pal[ATARI_PAL_MAX][3];
+static short g_pal_count = 0;          /* 0: not read yet */
+static short g_taken_hi = 2;
+static struct { u8 r, g, b, ok; short pen; } g_pen_cache[8];
+static u32 g_pen_cache_next = 0;
+
+void atari_palette_taken(short first, short count)
+{
+    u32 i;
+
+    if (first + count > g_taken_hi) g_taken_hi = (short)(first + count);
+    g_pal_count = 0;
+    for (i = 0; i < 8; i++) g_pen_cache[i].ok = 0;
+}
+
+short atari_nearest_pen(u8 r, u8 g, u8 b)
+{
+    i32 tr, tg, tb, best_d = -1;
+    short best = G_BLACK, i, n;
+    u32 k;
+
+    if (ensure_metrics_vdi() != WP_OK || g_num_colors < 16) {
+        return ((u32)r + (u32)g + (u32)b < 384) ? (short)G_BLACK : (short)G_WHITE;
+    }
+    for (k = 0; k < 8; k++) {
+        if (g_pen_cache[k].ok && g_pen_cache[k].r == r && g_pen_cache[k].g == g && g_pen_cache[k].b == b)
+            return g_pen_cache[k].pen;
+    }
+    if (g_pal_count == 0) {
+        n = (short)(g_num_colors < ATARI_PAL_MAX ? g_num_colors : ATARI_PAL_MAX);
+        for (i = 0; i < n; i++) (void)vq_color(g_metrics_vdi, i, 1, g_pal[i]);
+        g_pal_count = n;
+    }
+    tr = ((i32)r * 1000) / 255;
+    tg = ((i32)g * 1000) / 255;
+    tb = ((i32)b * 1000) / 255;
+    for (i = 0; i < g_pal_count; i++) {
+        i32 dr, dg, db, d;
+        if (i >= 2 && i < g_taken_hi) continue;
+        dr = g_pal[i][0] - tr; dg = g_pal[i][1] - tg; db = g_pal[i][2] - tb;
+        d = dr * dr + dg * dg + db * db;
+        if (best_d < 0 || d < best_d) { best_d = d; best = i; }
+    }
+    k = g_pen_cache_next++ & 7u;
+    g_pen_cache[k].r = r; g_pen_cache[k].g = g; g_pen_cache[k].b = b;
+    g_pen_cache[k].pen = best;
+    g_pen_cache[k].ok = 1;
+    return best;
+}
+
 static short map_effects(u16 style_flags)
 {
     short effects = TXT_NORMAL;

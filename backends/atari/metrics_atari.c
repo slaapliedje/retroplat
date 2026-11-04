@@ -59,6 +59,38 @@ static short g_sys_cell_h = 0;
 
 static void build_font_table(void);
 
+/* The faces a resident GDOS loaded for g_metrics_vdi, by vqt_name: its
+   index-1 entry is the system font, the rest whatever ASSIGN.SYS (or
+   Speedo's font list) gave it. Empty without a GDOS -- the system font
+   is then the only face and there is nothing to name. Face ids are the
+   same on every handle that loaded the same fonts, which is what lets a
+   window's own handle (atari_ensure_gdos_fonts) select one found here. */
+#define ATARI_MAX_FACES 32
+typedef struct {
+    short id;
+    char  name[34];    /* vqt_name writes 32 characters and a NUL, and
+                          some GDOS a flag byte after */
+} atari_face;
+static atari_face g_faces[ATARI_MAX_FACES];
+static short g_face_count = 0;
+
+static void build_face_table(short total)
+{
+    short i;
+
+    g_face_count = 0;
+    for (i = 1; i <= total && g_face_count < ATARI_MAX_FACES; i++) {
+        atari_face *f = &g_faces[g_face_count];
+        short n;
+
+        memset(f->name, 0, sizeof(f->name));
+        f->id = vqt_name(g_metrics_vdi, i, f->name);
+        f->name[32] = '\0';
+        for (n = 31; n >= 0 && (f->name[n] == ' ' || f->name[n] == '\0'); n--) f->name[n] = '\0';
+        if (f->name[0] != '\0' && f->id > 0) g_face_count++;
+    }
+}
+
 static wp_status ensure_metrics_vdi(void)
 {
     short work_in[11];
@@ -101,7 +133,13 @@ static wp_status ensure_metrics_vdi(void)
        never leave g_num_colors at something nonsensical. */
     if (work_out[13] > 0) g_num_colors = (i32)work_out[13];
 
-    atari_ensure_gdos_fonts(g_metrics_vdi);
+    /* atari_ensure_gdos_fonts' load, here by hand for its count:
+       work_out[10] faces are built in, vst_load_fonts adds the rest. */
+    {
+        short extra = 0;
+        if (vq_gdos() != 0) extra = vst_load_fonts(g_metrics_vdi, 0);
+        if (extra > 0) build_face_table((short)(work_out[10] + extra));
+    }
     build_font_table();
 
     return WP_OK;
@@ -360,8 +398,34 @@ void atari_select_font(VdiHdl vdi, const atari_font *f)
 {
     short charw, charh, cellw, cellh;
 
+    vst_font(vdi, f->face_id);
     vst_point(vdi, f->point_size, &charw, &charh, &cellw, &cellh);
     vst_effects(vdi, map_effects(f->style_flags));
+}
+
+static const char *face_name_at(u32 index, void *user)
+{
+    WP_UNUSED(user);
+    return g_faces[index].name;
+}
+
+u32 plat_font_face_count(void)
+{
+    if (ensure_metrics_vdi() != WP_OK) return 0;
+    return (g_face_count > 1) ? (u32)g_face_count : 0u;
+}
+
+wp_status plat_font_face_name(u32 index, u8 *utf8_out, u32 cap, u32 *len_out)
+{
+    u32 n;
+
+    *len_out = 0;
+    if (index >= plat_font_face_count()) return WP_RANGE;
+    n = (u32)strlen(g_faces[index].name);
+    if (n > cap) n = cap;
+    memcpy(utf8_out, g_faces[index].name, n);
+    *len_out = n;
+    return WP_OK;
 }
 
 wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
@@ -371,14 +435,24 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     wp_status st;
     short pt;
 
-    WP_UNUSED(utf8_font_name);
-    WP_UNUSED(name_len);
-
     st = ensure_metrics_vdi();
     if (st != WP_OK) return st;
 
     f = (atari_font *)mem_alloc((u32)sizeof(atari_font));
     if (f == NULL) return WP_NOMEM;
+
+    /* The named face if GDOS has it or one of its family, else the
+       system font. Sized by the same pick_point_size as the system
+       font: a Speedo outline at that vst_point argument comes out the
+       physical height the system cell does, and a bitmap GDOS face
+       snaps to its nearest size the way the system font always has. */
+    f->face_id = 1;
+    if (g_face_count > 1 &&
+        (name_len > 0 || (style_flags & PLAT_FAMILY_MASK) != 0)) {
+        i32 at = plat_font_pick(face_name_at, NULL, (u32)g_face_count,
+                                utf8_font_name, name_len, style_flags);
+        if (at >= 0) f->face_id = g_faces[at].id;
+    }
 
     /* NOT size_twips/20. point_size holds the vst_point ARGUMENT that
        yields the right physical cell on this screen, which is not the
@@ -437,6 +511,7 @@ wp_bool wp_atari_font_selfcheck(void)
 
         if (plat_font_open(NULL, 0, sizes[i], 0, &pf) != WP_OK) return WP_FALSE;
         af = (atari_font *)pf;
+        vst_font(g_metrics_vdi, af->face_id);
         vst_point(g_metrics_vdi, af->point_size, &charw, &charh, &cellw, &cellh);
         plat_font_close(pf);
 
@@ -475,6 +550,7 @@ wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
        signed coordinates) -- verified empirically against a real EmuTOS
        boot, where distances[3] matched vst_point's own charh exactly
        for the built-in bitmap font. See docs/atari-platform.md. */
+    vst_font(g_metrics_vdi, af->face_id);
     vst_point(g_metrics_vdi, af->point_size, &charw, &charh, &cellw, &cellh);
     vqt_fontinfo(g_metrics_vdi, &minade, &maxade, distances, &maxwidth, effects);
 

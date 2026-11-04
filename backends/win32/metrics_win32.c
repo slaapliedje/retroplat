@@ -102,6 +102,66 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     return WP_OK;
 }
 
+/* The installed families, by EnumFontFamiliesExW over the screen DC,
+   once; '@'-prefixed vertical variants left out, as every Windows font
+   menu leaves them out. Kept as UTF-8, the seam's encoding. */
+#define W32_MAX_FACES 128
+#define W32_FACE_CAP  (LF_FACESIZE * 3)
+static char g_faces[W32_MAX_FACES][W32_FACE_CAP];
+static u32 g_face_count = 0;
+static int g_faces_read = 0;
+
+static int CALLBACK face_proc(const LOGFONTW *lf, const TEXTMETRICW *tm, DWORD type, LPARAM user)
+{
+    int n;
+    u32 k;
+
+    (void)tm; (void)type; (void)user;
+    if (lf->lfFaceName[0] == L'@' || g_face_count >= W32_MAX_FACES) return 1;
+    n = WideCharToMultiByte(CP_UTF8, 0, lf->lfFaceName, -1, g_faces[g_face_count],
+                            W32_FACE_CAP, NULL, NULL);
+    if (n <= 1) return 1;
+    for (k = 0; k < g_face_count; k++) {
+        if (strcmp(g_faces[k], g_faces[g_face_count]) == 0) return 1;
+    }
+    g_face_count++;
+    return 1;
+}
+
+static void read_faces(void)
+{
+    HDC dc;
+    LOGFONTW lf;
+
+    if (g_faces_read) return;
+    g_faces_read = 1;
+    memset(&lf, 0, sizeof(lf));
+    lf.lfCharSet = DEFAULT_CHARSET;
+    dc = GetDC(NULL);
+    if (dc == NULL) return;
+    EnumFontFamiliesExW(dc, &lf, (FONTENUMPROCW)face_proc, 0, 0);
+    ReleaseDC(NULL, dc);
+}
+
+u32 plat_font_face_count(void)
+{
+    read_faces();
+    return g_face_count;
+}
+
+wp_status plat_font_face_name(u32 index, u8 *utf8_out, u32 cap, u32 *len_out)
+{
+    u32 n;
+
+    *len_out = 0;
+    if (index >= plat_font_face_count()) return WP_RANGE;
+    n = (u32)strlen(g_faces[index]);
+    if (n > cap) n = cap;
+    memcpy(utf8_out, g_faces[index], n);
+    *len_out = n;
+    return WP_OK;
+}
+
 void plat_font_close(plat_font *f)
 {
     w32_font *wf = (w32_font *)f;

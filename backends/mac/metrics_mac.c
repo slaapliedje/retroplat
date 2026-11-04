@@ -3,6 +3,7 @@
 #include <string.h>
 #include <Quickdraw.h>
 #include <Fonts.h>
+#include <Resources.h>
 #include "platform.h"
 #include "metrics_mac_internal.h"
 
@@ -74,6 +75,74 @@ static void select_font(mac_font *f)
     TextFace((short)f->style);
 }
 
+/* The installed families, by their 'FOND' resources' names -- what the
+   Font menu of every Mac application lists -- read once, without
+   loading a single resource (SetResLoad(false)). */
+#define MAC_MAX_FACES 32
+#define MAC_FACE_NAME_CAP 32
+static char g_faces[MAC_MAX_FACES][MAC_FACE_NAME_CAP];
+static u32 g_face_count = 0;
+static wp_bool g_faces_read = WP_FALSE;
+
+static void read_faces(void)
+{
+    short count, i;
+
+    if (g_faces_read) return;
+    g_faces_read = WP_TRUE;
+
+    SetResLoad(false);
+    count = CountResources('FOND');
+    for (i = 1; i <= count && g_face_count < MAC_MAX_FACES; i++) {
+        Handle h = GetIndResource('FOND', i);
+        short id;
+        ResType type;
+        Str255 name;
+        u32 n, k;
+        wp_bool dup = WP_FALSE;
+
+        if (h == NULL) continue;
+        name[0] = 0;
+        GetResInfo(h, &id, &type, name);
+        n = name[0];
+        if (n == 0 || name[1] == '.' || name[1] == '%') continue;   /* hidden system faces */
+        if (n >= MAC_FACE_NAME_CAP) n = MAC_FACE_NAME_CAP - 1;
+        for (k = 0; k < g_face_count; k++) {
+            if (strlen(g_faces[k]) == n && memcmp(g_faces[k], name + 1, n) == 0) { dup = WP_TRUE; break; }
+        }
+        if (dup) continue;
+        memcpy(g_faces[g_face_count], name + 1, n);
+        g_faces[g_face_count][n] = '\0';
+        g_face_count++;
+    }
+    SetResLoad(true);
+}
+
+static const char *face_name_at(u32 index, void *user)
+{
+    (void)user;
+    return g_faces[index];
+}
+
+u32 plat_font_face_count(void)
+{
+    read_faces();
+    return (g_face_count > 1) ? g_face_count : 0u;
+}
+
+wp_status plat_font_face_name(u32 index, u8 *utf8_out, u32 cap, u32 *len_out)
+{
+    u32 n;
+
+    *len_out = 0;
+    if (index >= plat_font_face_count()) return WP_RANGE;
+    n = (u32)strlen(g_faces[index]);
+    if (n > cap) n = cap;
+    memcpy(utf8_out, g_faces[index], n);
+    *len_out = n;
+    return WP_OK;
+}
+
 wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
                           i32 size_twips, u16 style_flags, plat_font **out)
 {
@@ -84,16 +153,27 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
 
     if (out == NULL) return WP_ERR;
 
-    /* The engine always requests the platform's default font today (an
-       empty name -- see linebreak.c's measure_and_height comment), the
-       same boundary metrics_atari.c/metrics_amiga.c both respect --
-       GetFNum is only even called when a real name is actually given. */
+    /* An empty name is the system font, as it always was. A name is
+       looked up through the installed families -- exactly, or "Times"
+       for "Times New Roman" -- and failing that the request's family
+       picks one ("Courier" for a monospace); a face the Mac does not
+       have at all and no family for stays the system font. */
     n = name_len;
     if (n > 255) n = 255;
-    if (n > 0) {
-        pname[0] = (unsigned char)n;
-        memcpy(pname + 1, utf8_font_name, n);
-        GetFNum(pname, &familyID); /* leaves familyID at 0 (systemFont) if not found */
+    if (n > 0 || (style_flags & PLAT_FAMILY_MASK) != 0) {
+        i32 at;
+        read_faces();
+        at = plat_font_pick(face_name_at, NULL, g_face_count, utf8_font_name, n, style_flags);
+        if (at >= 0) {
+            n = (u32)strlen(g_faces[at]);
+            pname[0] = (unsigned char)n;
+            memcpy(pname + 1, g_faces[at], n);
+            GetFNum(pname, &familyID);
+        } else if (n > 0) {
+            pname[0] = (unsigned char)n;
+            memcpy(pname + 1, utf8_font_name, n);
+            GetFNum(pname, &familyID); /* leaves familyID at 0 (systemFont) if not found */
+        }
     }
 
     f = (mac_font *)mem_alloc((u32)sizeof(mac_font));

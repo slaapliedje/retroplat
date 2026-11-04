@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QFontInfo>
 #include <QFontDatabase>
+#include <QStringList>
 #include <cstring>
 
 #include "metrics_qt_internal.h"
@@ -84,6 +85,37 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     f->size_twips = size_twips;
 
     *out = (plat_font *)f;
+    return WP_OK;
+}
+
+/* The system's families, sorted as QFontDatabase gives them; read once
+   (the database is not cheap to build, and the list does not change
+   under a running word processor often enough to matter). */
+static QStringList *g_faces = NULL;
+
+static const QStringList &faces()
+{
+    if (g_faces == NULL) g_faces = new QStringList(QFontDatabase().families());
+    return *g_faces;
+}
+
+u32 plat_font_face_count(void)
+{
+    return (u32)faces().size();
+}
+
+wp_status plat_font_face_name(u32 index, u8 *utf8_out, u32 cap, u32 *len_out)
+{
+    QByteArray b;
+    u32 n;
+
+    *len_out = 0;
+    if (index >= plat_font_face_count()) return WP_RANGE;
+    b = faces().at((int)index).toUtf8();
+    n = (u32)b.size();
+    if (n > cap) n = cap;
+    std::memcpy(utf8_out, b.constData(), n);
+    *len_out = n;
     return WP_OK;
 }
 

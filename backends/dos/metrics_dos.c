@@ -30,6 +30,18 @@ void plat_font_close(plat_font *f)
     mem_free(f);
 }
 
+/* One face, the adapter's: nothing to choose between. */
+u32 plat_font_face_count(void) { return 0; }
+
+wp_status plat_font_face_name(u32 index, u8 *utf8_out, u32 cap, u32 *len_out)
+{
+    WP_UNUSED(index);
+    WP_UNUSED(utf8_out);
+    WP_UNUSED(cap);
+    *len_out = 0;
+    return WP_RANGE;
+}
+
 /* Fixed regardless of the font's requested size_twips -- see
    metrics_dos_internal.h's own comment on dos_font. ascent/descent are
    a plausible split of the one fixed cell height (192+48 = 240,

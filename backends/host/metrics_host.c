@@ -33,6 +33,28 @@ void plat_font_close(plat_font *f)
     mem_free(f);
 }
 
+/* Three faces, so a font menu has something to list under test. Names
+   only: every face measures alike here, so no wrap point moves when a
+   document names one. */
+static const char *const g_host_faces[] = { "Helvetica", "Times", "Courier" };
+
+u32 plat_font_face_count(void)
+{
+    return (u32)(sizeof(g_host_faces) / sizeof(g_host_faces[0]));
+}
+
+wp_status plat_font_face_name(u32 index, u8 *utf8_out, u32 cap, u32 *len_out)
+{
+    u32 n, i;
+
+    if (index >= plat_font_face_count()) return WP_RANGE;
+    for (n = 0; g_host_faces[index][n] != '\0'; n++) { }
+    if (n > cap) n = cap;
+    for (i = 0; i < n; i++) utf8_out[i] = (u8)g_host_faces[index][i];
+    *len_out = n;
+    return WP_OK;
+}
+
 wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
 {
     host_font *hf = (host_font *)f;

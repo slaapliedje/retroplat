@@ -57,6 +57,8 @@ i32 atari_screen_max_colors(void);
 typedef struct {
     short point_size;
     u16   style_flags;
+    short face_id;     /* vst_font's argument: 1 is the system font, any
+                          other a GDOS face found by plat_font_open */
 } atari_font;
 
 /* Applies point size + effects (bold/italic/underline) to vdi's own

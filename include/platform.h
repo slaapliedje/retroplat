@@ -109,6 +109,20 @@ void plat_sleep_ms(u32 ms);
 #define PLAT_STYLE_UNDERLINE (1u << 2)
 #define PLAT_STYLE_STRIKE    (1u << 3)
 
+/* A typeface's generic family, in bits 8..10 of the same style_flags:
+   what a backend that does not have the NAMED face falls back on -- a
+   serif for "Times New Roman", a monospace for "Courier". 0 is no
+   preference. A backend that ignores these bits loses only the
+   fallback; the values are RTF's \froman/\fswiss/... order, and an
+   application restating them is held to it the way the style bits are. */
+#define PLAT_FAMILY_SHIFT  8
+#define PLAT_FAMILY_MASK   (7u << PLAT_FAMILY_SHIFT)
+#define PLAT_FAMILY_ROMAN  1u   /* serif: Times, Dutch, New York */
+#define PLAT_FAMILY_SWISS  2u   /* sans: Helvetica, Swiss, Geneva */
+#define PLAT_FAMILY_MODERN 3u   /* monospace: Courier, Monaco */
+#define PLAT_FAMILY_SCRIPT 4u
+#define PLAT_FAMILY_DECOR  5u
+
 typedef void plat_font;
 
 typedef struct {
@@ -121,6 +135,24 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
                           i32 size_twips, u16 style_flags, plat_font **out);
 void      plat_font_close(plat_font *f);
 wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out);
+
+/* The faces this target can show, for a font menu: index 0..count-1,
+   each a name plat_font_open will find. A target with nothing to choose
+   between (one built-in face, a text screen) has a count of 0. The name
+   is UTF-8, not NUL-terminated; WP_RANGE for an index past the count. */
+u32       plat_font_face_count(void);
+wp_status plat_font_face_name(u32 index, u8 *utf8_out, u32 cap, u32 *len_out);
+
+/* Shared by the backends that hold a face list (src/fontpick.c): which
+   of `count` faces, named by name_at(i, user) as NUL-terminated ASCII,
+   best answers a request for `want` under style_flags -- the same name
+   (case ignored), then one that begins with it or that it begins with
+   ("Swiss" for "Swiss 721", "Times" for "Times New Roman"), then any of
+   the requested family (PLAT_FAMILY_*). A face whose name carries a
+   weight or slant the request did not ask for ("... Bold") loses to one
+   that does not. -1 for none: open the default. */
+i32 plat_font_pick(const char *(*name_at)(u32 index, void *user), void *user, u32 count,
+                   const u8 *want, u32 want_len, u16 style_flags);
 
 /* Measures a UTF-8 run under font f. width_twips_out is set to the run's
    advance width in twips. Layout depends on this being exact and

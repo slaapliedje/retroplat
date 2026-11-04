@@ -11,6 +11,7 @@
 #include <proto/graphics.h>
 #include <proto/intuition.h>
 #include <proto/diskfont.h>
+#include <diskfont/diskfont.h>
 
 #include "platform.h"
 #include "metrics_amiga_internal.h"
@@ -185,15 +186,93 @@ static UWORD map_style(u16 style_flags)
     return style;
 }
 
+/* The faces in memory and in FONTS:, one per .font name whatever its
+   sizes, read once by AvailFonts the first time anything asks -- a
+   floppy-only machine pays for the FONTS: scan only when a document
+   names a face or the font menu is opened. Shown without ".font" and
+   with a capital ("Times"), which is how a document names them; the
+   file name is that plus ".font" again, lower-cased the way the Amiga's
+   own fonts are spelled (OpenDiskFont ignores case regardless). */
+#define AMIGA_MAX_FACES 32
+#define AMIGA_FACE_NAME_CAP 32
+static char g_faces[AMIGA_MAX_FACES][AMIGA_FACE_NAME_CAP];
+static u32 g_face_count = 0;
+static wp_bool g_faces_read = WP_FALSE;
+
+static void read_faces(void)
+{
+    LONG size = 2048, more;
+    UBYTE *buf = NULL;
+    struct AvailFontsHeader *afh;
+    struct AvailFonts *af;
+    UWORD i;
+
+    if (g_faces_read) return;
+    g_faces_read = WP_TRUE;
+
+    for (;;) {
+        buf = (UBYTE *)mem_alloc((u32)size);
+        if (buf == NULL) return;
+        more = AvailFonts((struct AvailFontsHeader *)buf, size, AFF_MEMORY | AFF_DISK);
+        if (more <= 0) break;
+        mem_free(buf);
+        size += more;
+    }
+
+    afh = (struct AvailFontsHeader *)buf;
+    af = (struct AvailFonts *)(afh + 1);
+    for (i = 0; i < afh->afh_NumEntries && g_face_count < AMIGA_MAX_FACES; i++) {
+        const char *nm = (const char *)af[i].af_Attr.ta_Name;
+        char face[AMIGA_FACE_NAME_CAP];
+        u32 n = 0, k;
+        wp_bool dup = WP_FALSE;
+
+        if (nm == NULL) continue;
+        while (nm[n] != '\0' && n + 1 < sizeof(face)) { face[n] = nm[n]; n++; }
+        face[n] = '\0';
+        if (n > 5 && strcmp(face + n - 5, ".font") == 0) face[n -= 5] = '\0';
+        if (n == 0) continue;
+        if (face[0] >= 'a' && face[0] <= 'z') face[0] = (char)(face[0] - 32);
+        for (k = 0; k < g_face_count; k++) {
+            if (strcmp(g_faces[k], face) == 0) { dup = WP_TRUE; break; }
+        }
+        if (!dup) memcpy(g_faces[g_face_count++], face, n + 1);
+    }
+    mem_free(buf);
+}
+
+static const char *face_name_at(u32 index, void *user)
+{
+    WP_UNUSED(user);
+    return g_faces[index];
+}
+
+u32 plat_font_face_count(void)
+{
+    read_faces();
+    return (g_face_count > 1) ? g_face_count : 0u;
+}
+
+wp_status plat_font_face_name(u32 index, u8 *utf8_out, u32 cap, u32 *len_out)
+{
+    u32 n;
+
+    *len_out = 0;
+    if (index >= plat_font_face_count()) return WP_RANGE;
+    n = (u32)strlen(g_faces[index]);
+    if (n > cap) n = cap;
+    memcpy(utf8_out, g_faces[index], n);
+    *len_out = n;
+    return WP_OK;
+}
+
 wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
                           i32 size_twips, u16 style_flags, plat_font **out)
 {
     amiga_font *f;
     struct TextAttr ta;
     i32 px;
-
-    WP_UNUSED(utf8_font_name);
-    WP_UNUSED(name_len);
+    char file[AMIGA_FACE_NAME_CAP + 6];
 
     ensure_metrics_queried();
 
@@ -204,6 +283,20 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     if (px < 1) px = 1;
 
     ta.ta_Name = (STRPTR)(g_default_font_name[0] != '\0' ? g_default_font_name : (char *)"topaz.font");
+    if (name_len > 0 || (style_flags & PLAT_FAMILY_MASK) != 0) {
+        i32 at;
+        read_faces();
+        at = plat_font_pick(face_name_at, NULL, g_face_count, utf8_font_name, name_len, style_flags);
+        if (at >= 0) {
+            u32 n = (u32)strlen(g_faces[at]), k;
+            for (k = 0; k < n; k++) {
+                char c = g_faces[at][k];
+                file[k] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+            }
+            memcpy(file + n, ".font", 6);
+            ta.ta_Name = (STRPTR)file;
+        }
+    }
     ta.ta_YSize = (UWORD)px;
     ta.ta_Style = (UBYTE)map_style(style_flags);
     ta.ta_Flags = 0;

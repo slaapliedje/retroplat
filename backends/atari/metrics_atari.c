@@ -258,6 +258,20 @@ static void build_font_table(void)
  *
  * Falls back to the plain points conversion only if the sweep found
  * nothing, so this can never return something vst_point would reject. */
+/* The cell height, in device pixels, a size should come out at:
+   scaled from the AES's own system cell (8 in Medium, 16 in High), so
+   the body size looks like the machine's normal text; without a usable
+   cell, the real physical height (twips -> microns -> pixels, 1440
+   twips to 25400 microns, x * 635 / 36). */
+static i32 target_cell_px(i32 size_twips)
+{
+    i32 px;
+
+    if (g_sys_cell_h > 0) px = ((i32)g_sys_cell_h * size_twips) / ATARI_REFERENCE_BODY_TWIPS;
+    else px = ((size_twips * 635L) / 36L) / (g_px_um_y > 0 ? g_px_um_y : 1);
+    return (px < 1) ? 1 : px;
+}
+
 static short pick_point_size(i32 size_twips)
 {
     i32 target_px_h;
@@ -271,18 +285,7 @@ static short pick_point_size(i32 size_twips)
         return (pt < 1) ? (short)1 : pt;
     }
 
-    /* Target cell height in device pixels, scaled from the system cell.
-       g_sys_cell_h is whatever the AES reports for this mode (8 in
-       Medium, 16 in High), so this needs no per-mode knowledge. */
-    if (g_sys_cell_h > 0) {
-        target_px_h = ((i32)g_sys_cell_h * size_twips) / ATARI_REFERENCE_BODY_TWIPS;
-    } else {
-        /* No usable system cell: fall back to real physical height,
-           twips -> microns -> pixels (1440 twips / 25400 microns per
-           inch, i.e. x * 635 / 36). */
-        target_px_h = ((size_twips * 635L) / 36L) / (g_px_um_y > 0 ? g_px_um_y : 1);
-    }
-    if (target_px_h < 1) target_px_h = 1;
+    target_px_h = target_cell_px(size_twips);
 
     /* pass 0 applies the aspect filter; pass 1 repeats without it, so a
        device whose every cell fails (some future GDOS, a printer) still
@@ -516,6 +519,16 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
        plat_font_metrics_get, draw_atari.c) already treats this field as
        "what to hand vst_point", so nothing downstream changes. */
     pt = pick_point_size(size_twips);
+    if (f->face_id != 1) {
+        /* A GDOS face is not the system font, and the system font's few
+           sizes say nothing about it -- under fVDI they stop at the 8x16
+           cell, so 24 pt asked a TrueType face for 10. Its point size is
+           the target cell height at the screen's own vertical resolution
+           instead: the same physical height the system font would have
+           been aimed at, which an outline face hits exactly and a bitmap
+           face snaps to its nearest. */
+        pt = (short)((target_cell_px(size_twips) * 72L + g_dpi_y / 2) / (g_dpi_y > 0 ? g_dpi_y : 72));
+    }
     if (pt < 1) pt = 1;
     f->point_size = pt;
     f->style_flags = style_flags;

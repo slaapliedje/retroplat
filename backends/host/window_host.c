@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include <stddef.h>
 #include "platform.h"
+#include "window_host.h"
 
 /* No real GUI at this stage -- enough surface to link and let a test
    harness exercise the seam. plat_window/plat_gc are opaque handles per
@@ -52,6 +53,9 @@ wp_status plat_dialog_message(plat_window *parent, plat_dialog_kind kind,
     return WP_OK;
 }
 
+/* window_host.h: the next choice dialog's answer, or -1 for its default. */
+static i32 g_next_choice = -1;
+
 wp_status plat_dialog_choice(plat_window *parent,
                               const u8 *title_utf8, u32 title_len,
                               const u8 * const *option_labels_utf8,
@@ -71,5 +75,14 @@ wp_status plat_dialog_choice(plat_window *parent,
     if (option_count == 0) return WP_RANGE;
     if (out_cancelled) *out_cancelled = WP_FALSE;
     if (out_index) *out_index = (default_index < option_count) ? default_index : 0;
+    if (g_next_choice >= 0) {           /* a test said what to pick, once */
+        if (out_index && (u32)g_next_choice < option_count) *out_index = (u32)g_next_choice;
+        g_next_choice = -1;
+    }
     return WP_OK;
+}
+
+void window_host_next_choice(i32 index)
+{
+    g_next_choice = index;
 }

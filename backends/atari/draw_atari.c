@@ -251,6 +251,59 @@ wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     return WP_OK;
 }
 
+/* One vrt_cpyfm per icon, transparent: set pixels in the pen, clear
+   ones untouched. A one-plane MFDB is the same in standard and device
+   form, and the rows are already the VDI's words (big-endian, bit 15
+   leftmost) on the ST. Clipped by hand to the caller's rectangle --
+   raster copies ignore vs_clip. gem4xe's words are not the ST's byte
+   order, so it draws run by run instead. */
+wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                         const u16 *rows, u32 row_words, u8 r, u8 g, u8 b)
+{
+#ifdef GEM4XE_APP_GEM_H
+    return plat_mono_by_runs(gc, x, y, w, h, rows, row_words, r, g, b);
+#else
+    atari_gc *agc = (atari_gc *)gc;
+    MFDB src, dst;
+    short pxy[8];
+    short colors[2];
+    i32 sx = 0, sy = 0;
+
+    if (agc == NULL || rows == NULL || row_words == 0) return WP_ERR;
+    if (w > (i32)(row_words * 16u)) w = (i32)(row_words * 16u);
+    if (agc->clip_on) {
+        i32 cx1 = agc->clip[0], cy1 = agc->clip[1], cx2 = agc->clip[2], cy2 = agc->clip[3];
+        if (x < cx1) { sx = cx1 - x; w -= sx; x = cx1; }
+        if (y < cy1) { sy = cy1 - y; h -= sy; y = cy1; }
+        if (x + w - 1 > cx2) w = cx2 - x + 1;
+        if (y + h - 1 > cy2) h = cy2 - y + 1;
+    }
+    if (w <= 0 || h <= 0) return WP_OK;
+
+    memset(&src, 0, sizeof(src));
+    MFDB_SET_ADDR(src, (void *)rows);
+    src.fd_w = (short)(row_words * 16u);
+    src.fd_h = (short)(sy + h);
+    src.fd_wdwidth = (short)row_words;
+    src.fd_stand = 0;
+    src.fd_nplanes = 1;
+    memset(&dst, 0, sizeof(dst));          /* fd_addr 0: the screen */
+
+    pxy[0] = (short)sx;
+    pxy[1] = (short)sy;
+    pxy[2] = (short)(sx + w - 1);
+    pxy[3] = (short)(sy + h - 1);
+    pxy[4] = (short)x;
+    pxy[5] = (short)y;
+    pxy[6] = (short)(x + w - 1);
+    pxy[7] = (short)(y + h - 1);
+    colors[0] = rgb_to_vdi_color(r, g, b);
+    colors[1] = 0;
+    vrt_cpyfm(agc->vdi, MD_TRANS, pxy, &src, &dst, colors);
+    return WP_OK;
+#endif
+}
+
 void plat_gc_flush(plat_gc *gc)
 {
     WP_UNUSED(gc);

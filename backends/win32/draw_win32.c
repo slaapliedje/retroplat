@@ -81,6 +81,13 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
 /* GDI paints straight into whatever surface the DC names, and that surface
    is presented by whoever owns it -- the window manager after EndPaint, or
    a caller blitting a memory DC. There is nothing to flush. */
+/* No blit worth having here: plat_draw_mono run by run. */
+wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                         const u16 *rows, u32 row_words, u8 r, u8 g, u8 b)
+{
+    return plat_mono_by_runs(gc, x, y, w, h, rows, row_words, r, g, b);
+}
+
 void plat_gc_flush(plat_gc *gc)
 {
     (void)gc;

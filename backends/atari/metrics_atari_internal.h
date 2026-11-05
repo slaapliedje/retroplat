@@ -117,6 +117,12 @@ wp_bool wp_atari_font_selfcheck(void);
 typedef struct {
     VdiHdl vdi;
     short  window_handle;
+    /* The rectangle the caller has clipped the VDI to (vs_clip), as
+       x1,y1,x2,y2, when clip_on: VDI's raster copies ignore vs_clip, so
+       plat_draw_mono clips its blit to this itself. 0 = draw unclipped,
+       which a caller must only leave when the whole window is its. */
+    short  clip_on;
+    short  clip[4];
 } atari_gc;
 
 #endif /* WP_ATARI_METRICS_INTERNAL_H */

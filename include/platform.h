@@ -191,6 +191,19 @@ void      plat_gc_flush(plat_gc *gc);
    plat_dialog_choice is: DOS's own paint loop never calls this at all
    (pure text mode, no addressable graphics -- see docs/dos-platform.md),
    so draw_dos.c has no stub and needs none. */
+/* A one-bit bitmap -- an icon -- in one call: `h` rows of `row_words`
+   16-bit words each (bit 15 of a word the leftmost pixel), `w` pixels
+   wide. Set pixels take r,g,b; clear ones are left as they are. A
+   backend with a raster blit uses it -- one call where fills would be
+   dozens, which on an 8 MHz ST is the difference a toolbar repaint can
+   be seen taking -- and the rest draw it a run at a time through their
+   own plat_fill_rect, which plat_mono_by_runs (src/monobits.c) does for
+   them. */
+wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                         const u16 *rows, u32 row_words, u8 r, u8 g, u8 b);
+wp_status plat_mono_by_runs(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                            const u16 *rows, u32 row_words, u8 r, u8 g, u8 b);
+
 wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                            const u8 *pixels, i32 src_width_px, i32 src_height_px,
                            const u8 palette[][3], u8 palette_count);

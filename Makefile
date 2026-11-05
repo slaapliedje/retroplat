@@ -47,7 +47,7 @@ CFLAGS_MAC   = -Wall -Wextra -O2
 CFLAGS_DOS   = -0 -ml -bt=dos -wx
 
 # The portable half: no platform calls, no application, nothing to stub.
-PORTABLE_SRC = src/endian.c src/utf8.c src/fontpick.c
+PORTABLE_SRC = src/endian.c src/utf8.c src/fontpick.c src/monobits.c
 
 # Atari 8-bit, through gem4xe -- GEM for a 65816-accelerated XL/XE. The
 # ST's VDI-facing files (dialog, draw, metrics) compile unchanged against

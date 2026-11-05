@@ -15,16 +15,30 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
 }
 
 static u32 g_grey_fills[256];
+static u32 g_mono_calls;
 
 u32 draw_host_grey_fills(u8 level)
 {
     return g_grey_fills[level];
 }
 
+u32 draw_host_mono_calls(void)
+{
+    return g_mono_calls;
+}
+
 void draw_host_reset_fills(void)
 {
     u32 i;
     for (i = 0; i < 256; i++) g_grey_fills[i] = 0;
+    g_mono_calls = 0;
+}
+
+wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                         const u16 *rows, u32 row_words, u8 r, u8 g, u8 b)
+{
+    g_mono_calls++;
+    return plat_mono_by_runs(gc, x, y, w, h, rows, row_words, r, g, b);
 }
 
 wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,

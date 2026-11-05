@@ -185,6 +185,13 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
 
 /* Direct video-memory writes are visible the instant they happen --
    nothing to flush. */
+/* No blit worth having here: plat_draw_mono run by run. */
+wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                         const u16 *rows, u32 row_words, u8 r, u8 g, u8 b)
+{
+    return plat_mono_by_runs(gc, x, y, w, h, rows, row_words, r, g, b);
+}
+
 void plat_gc_flush(plat_gc *gc)
 {
     WP_UNUSED(gc);

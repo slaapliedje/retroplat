@@ -12,7 +12,7 @@ writing the same five backends again.
     include/types.h      fixed-width types, status enum
     include/endian.h     explicit big-endian read/write helpers
     include/utf8.h       encode/decode
-    src/                 the portable half: endian.c, utf8.c, fontpick.c
+    src/                 the portable half: endian.c, utf8.c, fontpick.c, monobits.c
     backends/host/       stub + POSIX, for building and testing off-target
     backends/atari/      GEM / VDI / TOS -- and, through gem4xe, the Atari
                          8-bit: the *_gem4xe.c files (see below)

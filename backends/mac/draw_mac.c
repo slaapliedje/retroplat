@@ -257,6 +257,32 @@ wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     return WP_OK;
 }
 
+/* One CopyBits per icon from a BitMap over the rows themselves:
+   srcOr sets the black pixels, srcBic clears for white -- the 1-bit
+   port has nothing between (select_fill_pattern's rule). CopyBits
+   honours the window's clip region, so nothing to clip by hand. */
+wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
+                         const u16 *rows, u32 row_words, u8 r, u8 g, u8 b)
+{
+    mac_gc *mgc = (mac_gc *)gc;
+    BitMap src;
+    Rect sr, dr;
+
+    if (mgc == NULL || rows == NULL || row_words == 0) return WP_ERR;
+    if (w > (i32)(row_words * 16u)) w = (i32)(row_words * 16u);
+    if (w <= 0 || h <= 0) return WP_OK;
+
+    src.baseAddr = (Ptr)rows;
+    src.rowBytes = (short)(row_words * 2u);
+    SetRect(&src.bounds, 0, 0, (short)(row_words * 16u), (short)h);
+    SetRect(&sr, 0, 0, (short)w, (short)h);
+    SetRect(&dr, (short)x, (short)y, (short)(x + w), (short)(y + h));
+    SetPort(mgc->window);
+    CopyBits(&src, &mgc->window->portBits, &sr, &dr,
+             ((u32)r + (u32)g + (u32)b < 384u) ? srcOr : srcBic, NULL);
+    return WP_OK;
+}
+
 void plat_gc_flush(plat_gc *gc)
 {
     WP_UNUSED(gc);

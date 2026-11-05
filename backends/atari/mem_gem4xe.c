@@ -80,8 +80,16 @@ static int arena_new(u32 need)
 
     if (min > want) want = round_up(min);
 
+    /* Two guards a wrong size taught (RetroWP b345046, 2026-11-05): a
+       request past the 65816's 16 MB can only be a garbage size, and must
+       not reach Malloc, where a negative LONG once meant "how much is
+       free" and answered with a block; and an answer below $01:0000 is
+       not an arena -- gem4xe never hands out bank $00, where a heap header
+       lands on the PIA and banks the stack away. Either is a plain
+       failure: mem_alloc returns NULL and the caller says WP_NOMEM. */
+    if (need > 0x00FFFFFFuL || want > 0x00FFFFFFuL) return 0;
     got = Malloc((LONG)want);
-    if (got <= 0) return 0;
+    if (got < 0x10000L) return 0;
 
     first = (blk *)(void *)(u32)got;
     first->size = want - HDR - HDR;

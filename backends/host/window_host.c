@@ -56,6 +56,9 @@ wp_status plat_dialog_message(plat_window *parent, plat_dialog_kind kind,
 /* window_host.h: the next choice dialog's answer, or -1 for its default. */
 static i32 g_next_choice = -1;
 
+/* window_host.h: the last choice dialog's title, NUL-terminated. */
+static char g_last_title[128];
+
 wp_status plat_dialog_choice(plat_window *parent,
                               const u8 *title_utf8, u32 title_len,
                               const u8 * const *option_labels_utf8,
@@ -67,9 +70,13 @@ wp_status plat_dialog_choice(plat_window *parent,
        cancels. Enough to let platform/common code (and host tests
        exercising it) link and run without a real GUI, same reasoning
        as plat_dialog_message above. */
+    u32 i;
+
     WP_UNUSED(parent);
-    WP_UNUSED(title_utf8);
-    WP_UNUSED(title_len);
+    for (i = 0; i < title_len && i + 1 < (u32)sizeof(g_last_title); i++) {
+        g_last_title[i] = (char)title_utf8[i];
+    }
+    g_last_title[i] = '\0';
     WP_UNUSED(option_labels_utf8);
     WP_UNUSED(option_label_lens);
     if (option_count == 0) return WP_RANGE;
@@ -85,4 +92,9 @@ wp_status plat_dialog_choice(plat_window *parent,
 void window_host_next_choice(i32 index)
 {
     g_next_choice = index;
+}
+
+const char *window_host_last_title(void)
+{
+    return g_last_title;
 }

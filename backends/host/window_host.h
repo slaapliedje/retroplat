@@ -9,4 +9,9 @@
    the default again. Never part of the portable surface. */
 void window_host_next_choice(i32 index);
 
+/* Host-only: the title the last plat_dialog_choice was shown ("" before
+   the first) -- which, for a one-button message (platform/common's
+   wp_action_tell), is the message itself. */
+const char *window_host_last_title(void);
+
 #endif /* WP_WINDOW_HOST_H */

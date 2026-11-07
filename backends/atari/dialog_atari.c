@@ -225,6 +225,68 @@ static wp_status build_dialog_tree(const u8 *title_utf8, u32 title_len,
     return WP_OK;
 }
 
+/* A message -- a choice of one -- is a GEM alert, as a GEM program's
+   messages are: form_alert saves and restores what is under it and
+   wraps the text, where the choice form below put the message on its
+   title line (cut at 39 characters), showed the one option as an
+   inverted list row above OK and Cancel, and left the last dialog's
+   frame behind it when the caller had not been back to its event loop
+   in between. Seen on a MiSTer ST core, "Printed 1 page on
+   HP-Color-LaserJet-MFP" in a Print-on dialog's clothes.
+
+   The alert's own limits: five lines of at most WP_ALERT_LINE
+   characters, a button of at most ten, and '[', ']' and '|' are its
+   syntax, so they are shown as '(', ')' and '/'. Lines break at spaces;
+   a word longer than a line is cut. */
+#define WP_ALERT_LINE  30
+#define WP_ALERT_LINES 5
+static char g_alert_buf[16 + WP_ALERT_LINES * (WP_ALERT_LINE + 1) + 16];
+
+static char alert_char(u8 c)
+{
+    if (c == '[') return '(';
+    if (c == ']') return ')';
+    if (c == '|') return '/';
+    if (c < 0x20) return ' ';
+    return (char)c;
+}
+
+static void show_alert(const u8 *msg, u32 len, const u8 *button, u32 button_len)
+{
+    u32 n = 0, i = 0, lines = 0;
+
+    memcpy(g_alert_buf, "[1][", 4);
+    n = 4;
+    while (i < len && lines < WP_ALERT_LINES) {
+        u32 take, brk;
+
+        while (i < len && msg[i] == ' ') i++;          /* no line starts with a space */
+        if (i >= len) break;
+        take = len - i;
+        if (take > WP_ALERT_LINE) {
+            take = WP_ALERT_LINE;
+            for (brk = take; brk > 0 && msg[i + brk] != ' '; brk--) { }
+            if (brk > 0) take = brk;                   /* else: one long word, cut */
+        }
+        if (lines > 0) g_alert_buf[n++] = '|';
+        for (brk = 0; brk < take; brk++) g_alert_buf[n++] = alert_char(msg[i + brk]);
+        i += take;
+        lines++;
+    }
+    if (lines == 0) g_alert_buf[n++] = ' ';
+    g_alert_buf[n++] = ']';
+    g_alert_buf[n++] = '[';
+    if (button_len == 0 || button_len > 10) {
+        memcpy(g_alert_buf + n, "OK", 2);
+        n += 2;
+    } else {
+        for (i = 0; i < button_len; i++) g_alert_buf[n++] = alert_char(button[i]);
+    }
+    g_alert_buf[n++] = ']';
+    g_alert_buf[n] = '\0';
+    form_alert(1, g_alert_buf);
+}
+
 wp_status plat_dialog_choice(plat_window *parent,
                               const u8 *title_utf8, u32 title_len,
                               const u8 * const *option_labels_utf8,
@@ -239,6 +301,13 @@ wp_status plat_dialog_choice(plat_window *parent,
     u32 i;
 
     WP_UNUSED(parent);
+
+    if (option_count == 1) {
+        show_alert(title_utf8, title_len, option_labels_utf8[0], option_label_lens[0]);
+        if (out_cancelled) *out_cancelled = WP_FALSE;
+        if (out_index) *out_index = 0;
+        return WP_OK;
+    }
 
     st = build_dialog_tree(title_utf8, title_len, option_labels_utf8, option_label_lens,
                             option_count, default_index,

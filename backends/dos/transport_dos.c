@@ -1,24 +1,43 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include <stddef.h>
 #include <string.h>
+#include <conio.h>
 #include <i86.h>
 #include "platform.h"
 
-/* Real serial transport (T14.4) over BIOS INT 14h's classic serial
-   services (AH=00h init, 01h send, 02h receive, 03h get status) --
-   the same "no networking stack, serial only" scope
-   platform/atari/transport_atari.c already established, now for a
-   third real target. `endpoint` prefixes other than "serial:"
-   (including "tcp:") are WP_UNSUPPORTED here, honestly, not silently
-   accepted -- mirrors transport_atari.c's own choice exactly.
+/* Real serial transport (T14.4), driving the COM port's 8250/16550 UART
+   directly by port I/O -- what DOS communications programs do -- with
+   the same "serial only" scope platform/atari/transport_atari.c has.
+   `endpoint` prefixes other than "serial:" (including "tcp:") are
+   WP_UNSUPPORTED here, honestly, not silently accepted.
 
-   endpoint format: "serial:<device>:<baud>" (platform.h's own doc
-   comment establishes this convention). <device> is the BIOS COM port
-   number: 0=COM1, 1=COM2, 2=COM3, 3=COM4 (INT 14h's own DX
-   convention) -- unlike the ST's single fixed AUX port, real PC
-   hardware can have several, so this field is actually meaningful
-   here, not just kept for shape as transport_atari.c's own comment
-   notes it is on that target. */
+   endpoint format: "serial:<device>:<baud>" (platform.h). <device> is
+   the COM port: 0=COM1, 1=COM2, 2=COM3, 3=COM4. Its I/O base comes from
+   the BIOS data area's table at 0040:0000 (what POST found), else the
+   standard addresses. <baud> is any rate whose divisor of 115200 is a
+   whole number, 300 to 115200.
+
+   Not BIOS INT 14h, which this used to be. Its send (AH=01h) raises DTR
+   and RTS and then waits for the modem's DSR and CTS before it will
+   transmit -- the IBM PC BIOS's own definition -- so on a line whose
+   far end does not drive those (a MiSTer ao486's COM1, whose modem lines
+   come from the MiSTer's Linux side) every byte timed out unsent and
+   the gateway never heard a HELLO. It also stopped at 9600 baud. The
+   UART itself needs neither: 8N1 at the divisor, DTR and RTS raised for
+   a far end that does watch them, and the line status register polled
+   for "may send" and "byte waiting". */
+
+#define UART_RBR 0  /* receive buffer (read) / transmit holding (write) */
+#define UART_DLL 0  /* divisor latch, low  -- while LCR bit 7 is set */
+#define UART_DLM 1  /* divisor latch, high -- while LCR bit 7 is set */
+#define UART_IER 1  /* interrupt enable */
+#define UART_FCR 2  /* FIFO control (write) */
+#define UART_LCR 3  /* line control */
+#define UART_MCR 4  /* modem control */
+#define UART_LSR 5  /* line status */
+
+#define LSR_DATA_READY 0x01
+#define LSR_THR_EMPTY  0x20
 
 static wp_bool parse_port(const char *s, const char *end, int *out_port)
 {
@@ -36,10 +55,8 @@ static wp_bool parse_port(const char *s, const char *end, int *out_port)
     return WP_TRUE;
 }
 
-/* INT 14h AH=00h's own 3-bit baud index -- only these 8 discrete rates
-   are selectable at this BIOS layer (unlike the ST's Rsconf, which has
-   a richer set transport_atari.c's own parse_baud reflects). */
-static wp_bool parse_baud(const char *s, int *out_idx)
+/* The UART's divisor for `baud`: 115200 / baud, which must divide. */
+static wp_bool parse_baud(const char *s, unsigned *out_divisor)
 {
     long value = 0;
     wp_bool any_digit = WP_FALSE;
@@ -50,29 +67,23 @@ static wp_bool parse_baud(const char *s, int *out_idx)
         any_digit = WP_TRUE;
     }
     if (!any_digit || *s != '\0') return WP_FALSE;
-
-    switch (value) {
-    case 110:  *out_idx = 0; return WP_TRUE;
-    case 150:  *out_idx = 1; return WP_TRUE;
-    case 300:  *out_idx = 2; return WP_TRUE;
-    case 600:  *out_idx = 3; return WP_TRUE;
-    case 1200: *out_idx = 4; return WP_TRUE;
-    case 2400: *out_idx = 5; return WP_TRUE;
-    case 4800: *out_idx = 6; return WP_TRUE;
-    case 9600: *out_idx = 7; return WP_TRUE;
-    default:   return WP_FALSE;
-    }
+    if (value < 300 || value > 115200L || 115200L % value != 0) return WP_FALSE;
+    *out_divisor = (unsigned)(115200L / value);
+    return WP_TRUE;
 }
 
-/* AH=03h's own line-status bits (get-port-status and, per the BIOS
-   spec, the same byte returned in AH by the send/receive calls). */
-#define DOS_LSR_DATA_READY 0x01
-#define DOS_LSR_THR_EMPTY  0x20
-#define DOS_LSR_TIMEOUT    0x80
-
 typedef struct {
-    int port;
+    unsigned base;   /* the UART's I/O base */
 } dos_transport;
+
+static unsigned port_base(int port)
+{
+    static const unsigned standard[4] = { 0x3F8, 0x2F8, 0x3E8, 0x2E8 };
+    unsigned short __far *bda = (unsigned short __far *)MK_FP(0x0040, 0x0000);
+    unsigned base = bda[port];
+
+    return base != 0 ? base : standard[port];
+}
 
 wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
                                plat_transport **out)
@@ -80,13 +91,12 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
     dos_transport *t;
     const char *rest;
     const char *colon;
-    int port, baud_idx;
-    union REGS regs;
+    int port;
+    unsigned divisor, base;
 
-    WP_UNUSED(connect_timeout_ms); /* INT 14h's init takes effect
-                                       immediately -- no connection
-                                       handshake at this layer, same as
-                                       transport_atari.c's own Rsconf */
+    WP_UNUSED(connect_timeout_ms); /* the UART's settings take effect at
+                                       once -- no connection handshake at
+                                       this layer, as transport_atari.c */
 
     if (strncmp(endpoint, "serial:", 7) != 0) return WP_UNSUPPORTED;
     rest = endpoint + 7;
@@ -94,109 +104,69 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
     colon = strrchr(rest, ':');
     if (colon == NULL || colon == rest || colon[1] == '\0') return WP_ERR;
     if (!parse_port(rest, colon, &port)) return WP_ERR;
-    if (!parse_baud(colon + 1, &baud_idx)) return WP_ERR;
+    if (!parse_baud(colon + 1, &divisor)) return WP_ERR;
 
     t = (dos_transport *)mem_alloc((u32)sizeof(dos_transport));
     if (t == NULL) return WP_NOMEM;
-    t->port = port;
+    base = port_base(port);
+    t->base = base;
 
-    /* AL bit layout: baud(7-5) | parity(4-3) | stop(2) | wordlen(1-0).
-       8N1 -- parity=00 (none), stop=0 (1 bit), wordlen=11 (8 bits) --
-       low 5 bits = 0x03, matching 8N1 the same way transport_atari.c's
-       own RS_8BITS|RS_1STOP combination does for Rsconf. */
-    regs.h.ah = 0x00;
-    regs.h.al = (unsigned char)((baud_idx << 5) | 0x03);
-    regs.w.dx = (unsigned short)port;
-    int86(0x14, &regs, &regs);
+    outp(base + UART_IER, 0x00);                 /* polled: no interrupts */
+    outp(base + UART_LCR, 0x80);                 /* divisor latch */
+    outp(base + UART_DLL, divisor & 0xFF);
+    outp(base + UART_DLM, (divisor >> 8) & 0xFF);
+    outp(base + UART_LCR, 0x03);                 /* 8N1 */
+    outp(base + UART_FCR, 0x07);                 /* FIFOs on and cleared (a 16550; an 8250 ignores it) */
+    outp(base + UART_MCR, 0x03);                 /* DTR and RTS, for a far end that watches them */
+    while (inp(base + UART_LSR) & LSR_DATA_READY) (void)inp(base + UART_RBR);
 
     *out = (plat_transport *)t;
     return WP_OK;
 }
 
-/* Polls AH=03h (get status, non-blocking) for DATA_READY up to
-   timeout_ms for the FIRST byte (matching platform.h's documented
-   contract), then drains whatever else is immediately available (no
-   further waiting) up to out_cap via AH=02h -- the same "wait once,
-   then drain" shape transport_atari.c's own Bconstat/Bconin pair
-   already uses, so callers assembling a multi-byte frame
-   (offload/transport/wire.c) need fewer round trips than a strict
-   one-byte-per-call implementation would cost them. */
+/* Waits up to timeout_ms for the FIRST byte (platform.h's contract), then
+   drains whatever else is already there up to out_cap without waiting --
+   the "wait once, then drain" shape transport_atari.c's Bconstat/Bconin
+   pair has, so offload/transport/wire.c's frame reads take fewer calls. */
 wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
                                u32 timeout_ms, u32 *out_len)
 {
     dos_transport *dt = (dos_transport *)t;
     u32 deadline;
     u32 n = 0;
-    union REGS regs;
 
     if (out_len) *out_len = 0;
     if (out_cap == 0) return WP_OK;
+    if (dt == NULL) return WP_ERR;
 
     deadline = plat_ticks_ms() + timeout_ms;
-    for (;;) {
-        regs.h.ah = 0x03;
-        regs.w.dx = (unsigned short)dt->port;
-        int86(0x14, &regs, &regs);
-        if (regs.h.ah & DOS_LSR_DATA_READY) break;
+    while ((inp(dt->base + UART_LSR) & LSR_DATA_READY) == 0) {
         if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
     }
-
-    while (n < out_cap) {
-        regs.h.ah = 0x03;
-        regs.w.dx = (unsigned short)dt->port;
-        int86(0x14, &regs, &regs);
-        if (!(regs.h.ah & DOS_LSR_DATA_READY)) break;
-
-        regs.h.ah = 0x02;
-        regs.w.dx = (unsigned short)dt->port;
-        int86(0x14, &regs, &regs);
-        out[n++] = regs.h.al;
+    while (n < out_cap && (inp(dt->base + UART_LSR) & LSR_DATA_READY) != 0) {
+        out[n++] = (u8)inp(dt->base + UART_RBR);
     }
 
     if (out_len) *out_len = n;
     return WP_OK;
 }
 
-/* THR_EMPTY (transmit holding register empty, "ok to send") is the
-   transmit-side poll, mirroring DATA_READY's read-side role. Each byte
-   gets its own fresh timeout_ms budget, matching transport_atari.c's
-   own per-byte Bcostat loop.
-
-   A real, confirmed DOSBox limitation, found during Phase 4 bring-up:
-   against DOSBox's default `serial1=dummy` device, AH=03h's status
-   poll correctly reports THR_EMPTY (0x60) immediately, but AH=01h
-   (send) unconditionally returns AH=0x80 (timeout) regardless --
-   reproduced with a minimal, isolated raw INT 14h program bypassing
-   this file's own polling logic entirely, and confirmed independent
-   of CPU speed (`cpu_cycles`) and of manually asserting DTR/RTS/OUT2
-   via a direct Modem Control Register write, so this is not a bug in
-   this code or a fixable timing/handshake issue on this side. See
-   `docs/dos-platform.md` for the full account and
-   `wp_dos_transport_selfcheck`'s own comment for how this is verified
-   without depending on DOSBox's send path actually succeeding. */
+/* Each byte waits for "transmit holding register empty" with its own
+   timeout_ms, as transport_atari.c's per-byte Bcostat loop does. */
 wp_status plat_transport_write(plat_transport *t, const u8 *data, u32 len,
                                 u32 timeout_ms)
 {
     dos_transport *dt = (dos_transport *)t;
     u32 i;
-    union REGS regs;
 
+    if (dt == NULL) return WP_ERR;
     for (i = 0; i < len; i++) {
         u32 deadline = plat_ticks_ms() + timeout_ms;
 
-        for (;;) {
-            regs.h.ah = 0x03;
-            regs.w.dx = (unsigned short)dt->port;
-            int86(0x14, &regs, &regs);
-            if (regs.h.ah & DOS_LSR_THR_EMPTY) break;
+        while ((inp(dt->base + UART_LSR) & LSR_THR_EMPTY) == 0) {
             if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
         }
-
-        regs.h.ah = 0x01;
-        regs.h.al = data[i];
-        regs.w.dx = (unsigned short)dt->port;
-        int86(0x14, &regs, &regs);
-        if (regs.h.ah & DOS_LSR_TIMEOUT) return WP_ERR;
+        outp(dt->base + UART_RBR, data[i]);
     }
     return WP_OK;
 }

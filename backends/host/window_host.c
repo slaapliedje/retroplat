@@ -53,8 +53,11 @@ wp_status plat_dialog_message(plat_window *parent, plat_dialog_kind kind,
     return WP_OK;
 }
 
-/* window_host.h: the next choice dialog's answer, or -1 for its default. */
-static i32 g_next_choice = -1;
+/* window_host.h: the next choice dialogs' answers, in order (-1 = the
+   default), queued by window_host_next_choice. */
+#define HOST_CHOICE_QUEUE 16
+static i32 g_choice_queue[HOST_CHOICE_QUEUE];
+static u32 g_choice_head = 0, g_choice_count = 0;
 
 /* window_host.h: the last choice dialog's title, NUL-terminated. */
 static char g_last_title[128];
@@ -82,16 +85,20 @@ wp_status plat_dialog_choice(plat_window *parent,
     if (option_count == 0) return WP_RANGE;
     if (out_cancelled) *out_cancelled = WP_FALSE;
     if (out_index) *out_index = (default_index < option_count) ? default_index : 0;
-    if (g_next_choice >= 0) {           /* a test said what to pick, once */
-        if (out_index && (u32)g_next_choice < option_count) *out_index = (u32)g_next_choice;
-        g_next_choice = -1;
+    if (g_choice_count > 0) {           /* a test said what to pick, once */
+        i32 pick = g_choice_queue[g_choice_head];
+        g_choice_head = (g_choice_head + 1) % HOST_CHOICE_QUEUE;
+        g_choice_count--;
+        if (pick >= 0 && out_index && (u32)pick < option_count) *out_index = (u32)pick;
     }
     return WP_OK;
 }
 
 void window_host_next_choice(i32 index)
 {
-    g_next_choice = index;
+    if (g_choice_count >= HOST_CHOICE_QUEUE) return;
+    g_choice_queue[(g_choice_head + g_choice_count) % HOST_CHOICE_QUEUE] = index;
+    g_choice_count++;
 }
 
 const char *window_host_last_title(void)

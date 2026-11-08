@@ -146,6 +146,82 @@ static wp_status ensure_metrics_vdi(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Measuring for a printer                                             */
+/* ------------------------------------------------------------------ */
+
+/* Everything above that describes the device being measured, kept aside
+   while a printer is measured instead. */
+typedef struct {
+    VdiHdl vdi;
+    i32 dpi_x, dpi_y, num_colors, px_um_x, px_um_y;
+    atari_font_size sizes[ATARI_MAX_FONT_SIZES];
+    short size_count;
+    short sys_cell_w, sys_cell_h;
+    atari_face faces[ATARI_MAX_FACES];
+    short face_count;
+} atari_measure_state;
+
+static atari_measure_state g_screen_state;
+static wp_bool g_measuring_printer = WP_FALSE;
+
+static void save_state(atari_measure_state *st)
+{
+    st->vdi = g_metrics_vdi;
+    st->dpi_x = g_dpi_x; st->dpi_y = g_dpi_y;
+    st->num_colors = g_num_colors;
+    st->px_um_x = g_px_um_x; st->px_um_y = g_px_um_y;
+    memcpy(st->sizes, g_font_sizes, sizeof(g_font_sizes));
+    st->size_count = g_font_size_count;
+    st->sys_cell_w = g_sys_cell_w; st->sys_cell_h = g_sys_cell_h;
+    memcpy(st->faces, g_faces, sizeof(g_faces));
+    st->face_count = g_face_count;
+}
+
+static void restore_state(const atari_measure_state *st)
+{
+    g_metrics_vdi = st->vdi;
+    g_dpi_x = st->dpi_x; g_dpi_y = st->dpi_y;
+    g_num_colors = st->num_colors;
+    g_px_um_x = st->px_um_x; g_px_um_y = st->px_um_y;
+    memcpy(g_font_sizes, st->sizes, sizeof(g_font_sizes));
+    g_font_size_count = st->size_count;
+    g_sys_cell_w = st->sys_cell_w; g_sys_cell_h = st->sys_cell_h;
+    memcpy(g_faces, st->faces, sizeof(g_faces));
+    g_face_count = st->face_count;
+}
+
+wp_status atari_metrics_printer(VdiHdl printer, const short *work_out, short faces)
+{
+    if (printer <= 0 || work_out == NULL || work_out[3] <= 0 || work_out[4] <= 0) return WP_ERR;
+    if (ensure_metrics_vdi() != WP_OK) return WP_ERR;
+    if (!g_measuring_printer) save_state(&g_screen_state);
+    g_measuring_printer = WP_TRUE;
+
+    g_metrics_vdi = printer;
+    g_px_um_x = (i32)work_out[3];
+    g_px_um_y = (i32)work_out[4];
+    g_dpi_x = 25400L / g_px_um_x;
+    g_dpi_y = 25400L / g_px_um_y;
+    if (g_dpi_x < 1) g_dpi_x = 1;
+    if (g_dpi_y < 1) g_dpi_y = 1;
+    g_num_colors = 2;
+    /* No system cell: sizes are real points on paper (target_cell_px). */
+    g_sys_cell_w = 0;
+    g_sys_cell_h = 0;
+    g_face_count = 0;
+    if (faces > 1) build_face_table(faces);
+    build_font_table();
+    return WP_OK;
+}
+
+void atari_metrics_screen(void)
+{
+    if (!g_measuring_printer) return;
+    restore_state(&g_screen_state);
+    g_measuring_printer = WP_FALSE;
+}
+
+/* ------------------------------------------------------------------ */
 /* Picking a font by PHYSICAL size, not by VDI's declared point size    */
 /* ------------------------------------------------------------------ */
 

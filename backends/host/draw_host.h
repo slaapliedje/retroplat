@@ -15,4 +15,12 @@ void draw_host_reset_fills(void);
 /* plat_draw_mono calls since the last draw_host_reset_fills. */
 u32  draw_host_mono_calls(void);
 
+/* The text plat_draw_text was given since the last
+   draw_host_reset_text, the first DRAW_HOST_TEXT_MAX calls kept: where
+   it went (x, y: the baseline's start) and the string, cut to 47 bytes. */
+#define DRAW_HOST_TEXT_MAX 64
+u32         draw_host_text_count(void);
+const char *draw_host_text_at(u32 index, i32 *x_out, i32 *y_out);
+void        draw_host_reset_text(void);
+
 #endif /* WP_DRAW_HOST_H */

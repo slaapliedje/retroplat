@@ -99,6 +99,20 @@ void atari_select_font(VdiHdl vdi, const atari_font *f);
    every draw -- a fresh v_opnvwk handle starts with neither. */
 void atari_ensure_gdos_fonts(VdiHdl vdi);
 
+/* Measures text for a printer instead of the screen, until
+   atari_metrics_screen: printer is a printer workstation the caller
+   opened (GDOS v_opnwk), work_out what that returned, faces how many
+   faces it has once loaded (work_out[10] plus vst_load_fonts' answer).
+   Every plat_font_open, plat_measure_text and twips<->pixel conversion
+   then answers for the printer: its resolution, its faces, and sizes in
+   real points rather than scaled to GEM's system cell the way the
+   screen's are -- so the engine lays a document out for paper, and
+   plat_draw_text on an atari_gc holding that handle draws it. Fonts
+   opened before the switch belong to the screen; open them again.
+   WP_ERR, measuring unchanged, for a handle or report that cannot be. */
+wp_status atari_metrics_printer(VdiHdl printer, const short *work_out, short faces);
+void      atari_metrics_screen(void);
+
 /* Asserts the font picked for real body sizes is text-shaped in PHYSICAL
    units on the current screen -- the invariant ST Medium was violating
    (a 12pt document drawn in a cell 4.4x taller than wide). Lives with

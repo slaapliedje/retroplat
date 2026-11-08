@@ -24,6 +24,22 @@
    us several different plat_font instances that all share this one
    handle. */
 static VdiHdl g_metrics_vdi = 0;
+
+/* An outline GDOS -- SpeedoGDOS, FSM GDOS, NVDI: vq_vgdos says '_FSM'.
+   Its vst_point gives only the sizes EXTEND.SYS lists (10, 12 and 24 as
+   shipped), the nearest below the one asked for, so a 20 pt heading
+   printed at 12 pt; vst_arbpt scales a face to any size. Used for the
+   printer only: on the screen the snapping is what keeps small text
+   legible -- ST Medium's pixels are 372 microns tall, and an honest 8 pt
+   face (the body size scaled to the system cell) is unreadable there.
+   gemlib has vst_arbpt, but its installed headers do not declare it;
+   gem4xe has no outline GDOS. */
+/* Measuring a printer rather than the screen (atari_metrics_printer). */
+static wp_bool g_measuring_printer = WP_FALSE;
+#ifndef GEM4XE_APP_GEM_H
+short vst_arbpt(short handle, short point, short *wchar, short *hchar, short *wcell, short *hcell);
+static wp_bool g_outline_gdos = WP_FALSE;
+#endif
 static i32 g_dpi_x = ATARI_ASSUMED_DPI;
 static i32 g_dpi_y = ATARI_ASSUMED_DPI;
 static i32 g_num_colors = 2; /* conservative (mono) until queried */
@@ -138,6 +154,9 @@ static wp_status ensure_metrics_vdi(void)
     {
         short extra = 0;
         if (vq_gdos() != 0) extra = vst_load_fonts(g_metrics_vdi, 0);
+#ifndef GEM4XE_APP_GEM_H
+        g_outline_gdos = (wp_bool)(vq_gdos() != 0 && vq_vgdos() == GDOS_FSM);
+#endif
         if (extra > 0) build_face_table((short)(work_out[10] + extra));
     }
     build_font_table();
@@ -161,8 +180,6 @@ typedef struct {
     short face_count;
 } atari_measure_state;
 
-static atari_measure_state g_screen_state;
-static wp_bool g_measuring_printer = WP_FALSE;
 
 static void save_state(atari_measure_state *st)
 {
@@ -189,6 +206,8 @@ static void restore_state(const atari_measure_state *st)
     memcpy(g_faces, st->faces, sizeof(g_faces));
     g_face_count = st->face_count;
 }
+
+static atari_measure_state g_screen_state;
 
 wp_status atari_metrics_printer(VdiHdl printer, const short *work_out, short faces)
 {
@@ -528,12 +547,26 @@ static short map_effects(u16 style_flags)
    vqt_fontinfo, v_gtext) -- see metrics_atari_internal.h's own comment
    on why this takes an explicit vdi param rather than assuming
    g_metrics_vdi the way this function used to. */
-void atari_select_font(VdiHdl vdi, const atari_font *f)
+/* Selects f's face and size on vdi; *cellh_out the cell height it got. */
+static void select_face_size(VdiHdl vdi, const atari_font *f, short *cellh_out)
 {
     short charw, charh, cellw, cellh;
 
     vst_font(vdi, f->face_id);
+#ifndef GEM4XE_APP_GEM_H
+    if (g_outline_gdos && g_measuring_printer && f->face_id != 1)
+        (void)vst_arbpt(vdi, f->point_size, &charw, &charh, &cellw, &cellh);
+    else
+#endif
     vst_point(vdi, f->point_size, &charw, &charh, &cellw, &cellh);
+    *cellh_out = cellh;
+}
+
+void atari_select_font(VdiHdl vdi, const atari_font *f)
+{
+    short cellh;
+
+    select_face_size(vdi, f, &cellh);
     vst_effects(vdi, map_effects(f->style_flags));
 }
 
@@ -679,7 +712,7 @@ void plat_font_close(plat_font *f)
 wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
 {
     atari_font *af = (atari_font *)f;
-    short charw, charh, cellw, cellh;
+    short cellh;
     short minade, maxade, maxwidth;
     short distances[10];
     short effects[10];
@@ -694,8 +727,7 @@ wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
        signed coordinates) -- verified empirically against a real EmuTOS
        boot, where distances[3] matched vst_point's own charh exactly
        for the built-in bitmap font. See docs/atari-platform.md. */
-    vst_font(g_metrics_vdi, af->face_id);
-    vst_point(g_metrics_vdi, af->point_size, &charw, &charh, &cellw, &cellh);
+    select_face_size(g_metrics_vdi, af, &cellh);
     vqt_fontinfo(g_metrics_vdi, &minade, &maxade, distances, &maxwidth, effects);
 
     out->ascent = atari_px_to_twips_y((i32)distances[3]);
@@ -749,6 +781,13 @@ wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
     buf[n] = '\0';
 
     atari_select_font(g_metrics_vdi, af);
+    /* Slanting draws a glyph leaning over its neighbour and advances by
+       the upright width; vqt_extent counts the lean as well, which left a
+       gap after every italic word. Measured upright, the advance is what
+       the next word is placed by. */
+    if (af->style_flags & PLAT_STYLE_ITALIC) {
+        vst_effects(g_metrics_vdi, map_effects((u16)(af->style_flags & ~PLAT_STYLE_ITALIC)));
+    }
 
     if (n == 0) {
         *width_twips_out = 0;

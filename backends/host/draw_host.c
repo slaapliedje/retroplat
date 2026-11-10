@@ -49,6 +49,19 @@ void draw_host_reset_text(void)
 
 static u32 g_grey_fills[256];
 static u32 g_mono_calls;
+static u32 g_shade_calls;
+static u8  g_last_shade;
+
+u32 draw_host_shade_calls(void) { return g_shade_calls; }
+u8  draw_host_last_shade(void) { return g_last_shade; }
+
+wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
+{
+    WP_UNUSED(gc); WP_UNUSED(x); WP_UNUSED(y); WP_UNUSED(w); WP_UNUSED(h);
+    g_shade_calls++;
+    g_last_shade = percent;
+    return WP_OK;
+}
 
 u32 draw_host_grey_fills(u8 level)
 {
@@ -65,6 +78,7 @@ void draw_host_reset_fills(void)
     u32 i;
     for (i = 0; i < 256; i++) g_grey_fills[i] = 0;
     g_mono_calls = 0;
+    g_shade_calls = 0;
 }
 
 wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,

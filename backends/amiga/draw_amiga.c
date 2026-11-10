@@ -146,7 +146,10 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
     SetFont(agc->rp, af->tf);
     SetAPen(agc->rp, rgb_to_pen(agc->dri, r, g, b));
     SetBPen(agc->rp, (UBYTE)agc->dri->dri_Pens[BACKGROUNDPEN]);
-    SetDrMd(agc->rp, JAM2);
+    /* JAM1: the glyphs only. JAM2 filled each character's background,
+       punching holes in a paragraph's shading; MUI clears the object's
+       background before every full redraw, so nothing is left behind. */
+    SetDrMd(agc->rp, JAM1);
     Move(agc->rp, (LONG)x, (LONG)y);
     Text(agc->rp, (STRPTR)buf, (ULONG)out_len);
     return WP_OK;
@@ -161,6 +164,34 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
 
     SetAPen(agc->rp, rgb_to_pen_on(agc, r, g, b));
     RectFill(agc->rp, (LONG)x, (LONG)y, (LONG)(x + w - 1), (LONG)(y + h - 1));
+    return WP_OK;
+}
+
+/* Shading as an area pattern in the text pen over what is there (JAM1):
+   Workbench's four pens have no light grey, and the nearest pen to one
+   is white. Four rows of dots, about 1/8, 1/4, 1/2 and 3/4 coverage. */
+static UWORD g_shade_pat[4][4] = {
+    { 0x8888, 0x0000, 0x2222, 0x0000 },
+    { 0x8888, 0x2222, 0x8888, 0x2222 },
+    { 0x5555, 0xAAAA, 0x5555, 0xAAAA },
+    { 0x7777, 0xDDDD, 0x7777, 0xDDDD }
+};
+
+wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
+{
+    amiga_gc *agc = (amiga_gc *)gc;
+    u32 k;
+
+    if (agc == NULL) return WP_ERR;
+    if (w <= 0 || h <= 0 || percent == 0) return WP_OK;
+    k = percent < 19 ? 0u : percent < 38 ? 1u : percent < 63 ? 2u : 3u;
+    SetAPen(agc->rp, rgb_to_pen_on(agc, 0, 0, 0));
+    SetDrMd(agc->rp, JAM1);
+    agc->rp->AreaPtrn = g_shade_pat[k];
+    agc->rp->AreaPtSz = 2;            /* 2^2 = 4 rows */
+    RectFill(agc->rp, (LONG)x, (LONG)y, (LONG)(x + w - 1), (LONG)(y + h - 1));
+    agc->rp->AreaPtrn = NULL;
+    agc->rp->AreaPtSz = 0;
     return WP_OK;
 }
 

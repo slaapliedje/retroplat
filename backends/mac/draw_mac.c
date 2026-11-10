@@ -174,6 +174,28 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     return WP_OK;
 }
 
+/* QuickDraw's own greys: light gray, gray and dark gray patterns, or
+   black for the darkest. */
+wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
+{
+    mac_gc *mgc = (mac_gc *)gc;
+    Rect rect;
+
+    if (mgc == NULL) return WP_ERR;
+    if (w <= 0 || h <= 0 || percent == 0) return WP_OK;
+    SetPort(mgc->window);
+    SetRect(&rect, (short)x, (short)y, (short)(x + w), (short)(y + h));
+    if (percent < 38) PenPat(&qd.ltGray);
+    else if (percent < 63) PenPat(&qd.gray);
+    else if (percent < 88) PenPat(&qd.dkGray);
+    else PenPat(&qd.black);
+    PenMode(patOr);
+    PaintRect(&rect);
+    PenMode(patCopy);
+    PenPat(&qd.black);
+    return WP_OK;
+}
+
 /* M15 Phase 5b: real QuickDraw CopyBits blit, dithered down to this
    backend's hard-capped 1-bit tier (a plain NewWindow, not NewCWindow --
    true color is out of scope). Each pixel's palette RGB is reduced to

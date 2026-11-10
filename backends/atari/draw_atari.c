@@ -104,7 +104,12 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
        both handles coincidentally agreeing, so it stays. */
     atari_select_font(agc->vdi, af);
     vst_color(agc->vdi, rgb_to_vdi_color(r, g, b));
+    /* Transparent: in replace mode v_gtext paints each character cell's
+       background, which punched white holes in a paragraph's shading.
+       Every caller clears behind its text first. */
+    vswr_mode(agc->vdi, MD_TRANS);
     v_gtext(agc->vdi, (short)x, (short)y, buf);
+    vswr_mode(agc->vdi, MD_REPLACE);
     return WP_OK;
 }
 
@@ -124,6 +129,38 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     vsf_interior(agc->vdi, FIS_SOLID);
     vsf_color(agc->vdi, rgb_to_vdi_color(r, g, b));
     v_bar(agc->vdi, pxy);
+    return WP_OK;
+}
+
+/* VDI's fill patterns: style 1 to 7 of FIS_PATTERN are dither densities
+   from about 1/8 to 7/8, 8 solid -- on a screen or a printer workstation
+   alike, so shading prints as it shows. */
+wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
+{
+    atari_gc *agc = (atari_gc *)gc;
+    short pxy[4];
+    short style;
+
+    if (agc == NULL) return WP_ERR;
+    if (w <= 0 || h <= 0 || percent == 0) return WP_OK;
+    style = (short)(((i32)percent * 8 + 50) / 100);
+    if (style < 1) style = 1;
+    if (style > 8) style = 8;
+    pxy[0] = (short)x;
+    pxy[1] = (short)y;
+    pxy[2] = (short)(x + w - 1);
+    pxy[3] = (short)(y + h - 1);
+    vsf_interior(agc->vdi, FIS_PATTERN);
+    vsf_style(agc->vdi, style);
+    vsf_color(agc->vdi, G_BLACK);
+    vswr_mode(agc->vdi, MD_TRANS);
+    /* v_bar outlines its fill when the perimeter is on: invisible on a
+       solid fill, a rule around every shaded paragraph on a pattern. */
+    vsf_perimeter(agc->vdi, 0);
+    v_bar(agc->vdi, pxy);
+    vsf_perimeter(agc->vdi, 1);
+    vswr_mode(agc->vdi, MD_REPLACE);
+    vsf_interior(agc->vdi, FIS_SOLID);
     return WP_OK;
 }
 

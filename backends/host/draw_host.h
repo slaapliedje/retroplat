@@ -12,6 +12,11 @@
 u32  draw_host_grey_fills(u8 level);
 void draw_host_reset_fills(void);
 
+/* plat_fill_shade calls since the last draw_host_reset_fills, and the
+   last one's coverage. */
+u32  draw_host_shade_calls(void);
+u8   draw_host_last_shade(void);
+
 /* plat_draw_mono calls since the last draw_host_reset_fills. */
 u32  draw_host_mono_calls(void);
 

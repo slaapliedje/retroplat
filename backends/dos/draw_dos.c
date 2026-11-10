@@ -12,6 +12,27 @@
    platform/atari/draw_atari.c's own identical comment documents for
    its own high-ASCII gap -- a real CP437 table is a documented future
    improvement here too, not a silent one. */
+/* Code page 437's upper half, 0x80-0xFF, as Unicode: the PC's accented
+   letters, box-drawing characters and symbols. */
+static const u16 g_cp437_hi[128] = {
+    0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+    0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+    0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+    0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+    0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+    0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+    0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556,
+    0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+    0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F,
+    0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+    0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B,
+    0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+    0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,
+    0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+    0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248,
+    0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0
+};
+
 wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
                                u8 *out, u32 out_cap, u32 *out_len,
                                u32 *unmapped_count)
@@ -36,8 +57,14 @@ wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
         if (cp <= 0x7F) {
             out[written++] = (u8)cp;
         } else {
-            out[written++] = '?';
-            unmapped++;
+            u32 k;
+            for (k = 0; k < 128 && g_cp437_hi[k] != cp; k++) {}
+            if (k < 128) {
+                out[written++] = (u8)(0x80 + k);
+            } else {
+                out[written++] = '?';
+                unmapped++;
+            }
         }
         pos += n;
     }
@@ -56,7 +83,16 @@ wp_status plat_native_to_utf8(const u8 *native, u32 len,
     if (native == NULL || out == NULL) return WP_ERR;
 
     for (i = 0; i < len && written < out_cap; i++) {
-        out[written++] = (native[i] <= 0x7F) ? native[i] : (u8)'?';
+        u8 seq[4];
+        u32 n, k;
+
+        if (native[i] <= 0x7F) {
+            out[written++] = native[i];
+            continue;
+        }
+        n = utf8_encode(g_cp437_hi[native[i] - 0x80], seq);
+        if (written + n > out_cap) break;
+        for (k = 0; k < n; k++) out[written++] = seq[k];
     }
 
     if (out_len) *out_len = written;
@@ -162,6 +198,21 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
 
         attr = (u8)(existing_bg | (fg & 0x0F));
         dos_put_cell(col, y, native[i], attr);
+    }
+    return WP_OK;
+}
+
+/* Shading in text mode: a blue background. The screen's text is light
+   grey, and a grey background of any useful shade would hide it; text
+   drawn after keeps the background (plat_draw_text). */
+wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
+{
+    i32 row, col;
+
+    WP_UNUSED(gc);
+    if (percent == 0) return WP_OK;
+    for (row = y; row < y + h; row++) {
+        for (col = x; col < x + w; col++) dos_put_cell(col, row, ' ', (u8)(0x01 << 4));
     }
     return WP_OK;
 }

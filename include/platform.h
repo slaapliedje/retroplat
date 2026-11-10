@@ -169,6 +169,12 @@ typedef void plat_gc;
 
 wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
                           const u8 *utf8, u32 len, u8 r, u8 g, u8 b);
+/* A rectangle shaded grey at `percent` coverage (1..100, black ink on
+   what is there) in the device's own pattern -- a VDI or QuickDraw fill
+   pattern, the nearest grey on a colour screen. Shading has to survive
+   a two-colour device, a mono screen or a printer, where plat_fill_rect
+   turns a light grey into white. */
+wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent);
 wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                           u8 r, u8 g, u8 b);
 void      plat_gc_flush(plat_gc *gc);

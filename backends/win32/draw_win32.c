@@ -53,6 +53,15 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
     return WP_OK;
 }
 
+/* A colour screen shows a real grey: the nearest to the coverage. */
+wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
+{
+    u8 level = (u8)(255 - ((u32)(percent > 100 ? 100 : percent) * 255u) / 100u);
+
+    if (percent == 0) return WP_OK;
+    return plat_fill_rect(gc, x, y, w, h, level, level, level);
+}
+
 wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                          u8 r, u8 g, u8 b)
 {

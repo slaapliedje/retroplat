@@ -46,6 +46,14 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     return WP_OK;
 }
 
+/* A colour screen shows a real grey: the nearest to the coverage. */
+wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
+{
+    int level = 255 - ((int)(percent > 100 ? 100 : percent) * 255) / 100;
+    if (percent == 0) return WP_OK;
+    return plat_fill_rect(gc, x, y, w, h, (u8)level, (u8)level, (u8)level);
+}
+
 /* Qt paints into whatever surface the QPainter was opened on, and that
    surface is presented by whoever owns it -- a widget after paintEvent, or
    a caller saving a QImage. There is nothing to flush. */

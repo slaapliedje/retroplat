@@ -24,15 +24,26 @@ u8 plat_grey_percent(u8 r, u8 g, u8 b)
     return (u8)pct;
 }
 
+u8 plat_luma_percent(u8 r, u8 g, u8 b)
+{
+    i32 lum = ((i32)r * 30 + (i32)g * 59 + (i32)b * 11) / 100, pct;
+
+    if (lum >= 240 || lum < 16) return 0;             /* white or black */
+    pct = ((255 - lum) * 100 + 127) / 255;
+    if (pct < 1) pct = 1;
+    if (pct > 99) pct = 99;
+    return (u8)pct;
+}
+
 /* Even-odd, sampled at each pixel row's centre: the crossings of the
    row with every edge, sorted, filled in pairs. Edges are walked in
    doubled y so that "the row's centre" is an integer. */
-wp_status plat_polygon_by_spans(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
+wp_status plat_polygon_by_spans(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b, u8 shade)
 {
     i32 ymin, ymax, y;
     i32 *xs;
     u16 i;
-    u8 grey = plat_grey_percent(r, g, b);
+    u8 grey = shade;
 
     if (n < 3) return WP_OK;
     ymin = ymax = xy[1];

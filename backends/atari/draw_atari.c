@@ -184,12 +184,14 @@ static short g_poly_pxy[ATARI_POLY_MAX * 2];
 wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
 {
     atari_gc *agc = (atari_gc *)gc;
-    u8 grey = plat_grey_percent(r, g, b);
+    /* Below 16 colours -- mono, Medium, a printer -- every mid colour is
+       a pattern by its brightness; above, only a grey. */
+    u8 grey = atari_screen_max_colors() < 16 ? plat_luma_percent(r, g, b) : plat_grey_percent(r, g, b);
     u16 i;
 
     if (agc == NULL) return WP_ERR;
     if (n < 3) return WP_OK;
-    if (n > ATARI_POLY_MAX || agc->polys_by_spans) return plat_polygon_by_spans(gc, xy, n, r, g, b);
+    if (n > ATARI_POLY_MAX || agc->polys_by_spans) return plat_polygon_by_spans(gc, xy, n, r, g, b, grey);
     for (i = 0; i < n * 2; i++) g_poly_pxy[i] = (short)xy[i];
     if (grey != 0) {
         short style = (short)(((i32)grey * 8 + 50) / 100);

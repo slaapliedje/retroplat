@@ -224,12 +224,17 @@ wp_status plat_mono_by_runs(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
 wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b);
 wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
                              u8 r, u8 g, u8 b);
-wp_status plat_polygon_by_spans(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b);
+/* `shade` nonzero: each span shaded that percent (plat_fill_shade) --
+   how a two-colour device keeps a mid colour; 0: filled in r,g,b. */
+wp_status plat_polygon_by_spans(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b, u8 shade);
 wp_status plat_polyline_by_polygons(plat_gc *gc, const i32 *xy, u16 n, i32 width,
                                     u8 r, u8 g, u8 b);
 /* 1..99 for a grey between near-white and near-black (its darkness, as
-   plat_fill_shade takes it), 0 for any other colour. */
+   plat_fill_shade takes it), 0 for any other colour. plat_luma_percent
+   is the same for any colour by its brightness -- a device of two or
+   four colours shades every mid colour, or orange would go black. */
 u8        plat_grey_percent(u8 r, u8 g, u8 b);
+u8        plat_luma_percent(u8 r, u8 g, u8 b);
 
 wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                            const u8 *pixels, i32 src_width_px, i32 src_height_px,

@@ -201,7 +201,13 @@ wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
    follows y. graphics.library has no wide lines: those go as polygons. */
 wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
 {
-    return plat_polygon_by_spans(gc, xy, n, r, g, b);
+    amiga_gc *agc = (amiga_gc *)gc;
+    /* Workbench's four pens (or two): every mid colour a pattern by its
+       brightness; a screen of 16 or more finds a real pen for a colour. */
+    wp_bool few = (wp_bool)(agc == NULL || agc->screen == NULL || agc->screen->BitMap.Depth < 4 ||
+                            GfxBase->LibNode.lib_Version < 39);
+    return plat_polygon_by_spans(gc, xy, n, r, g, b,
+                                 few ? plat_luma_percent(r, g, b) : plat_grey_percent(r, g, b));
 }
 
 wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,

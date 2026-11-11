@@ -202,7 +202,7 @@ wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
    on every other machine. */
 static void select_vector_pattern(u8 r, u8 g, u8 b)
 {
-    u8 grey = plat_grey_percent(r, g, b);
+    u8 grey = plat_luma_percent(r, g, b);   /* this backend is one-bit throughout */
 
     if (grey == 0) { select_fill_pattern(r, g, b); PenMode(patCopy); return; }
     if (grey < 38) PenPat(&qd.ltGray);

@@ -53,8 +53,9 @@ wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
         if (cp <= 0xFF) {
             out[written++] = (u8)cp;
         } else {
-            out[written++] = '?';
-            unmapped++;
+            u8 f = utf8_ascii_fallback(cp);   /* the nearest plain character, if any */
+            out[written++] = f != 0 ? f : (u8)'?';
+            if (f == 0) unmapped++;
         }
         pos += n;
     }

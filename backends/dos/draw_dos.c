@@ -62,8 +62,9 @@ wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
             if (k < 128) {
                 out[written++] = (u8)(0x80 + k);
             } else {
-                out[written++] = '?';
-                unmapped++;
+                u8 f = utf8_ascii_fallback(cp);   /* the nearest plain character, if any */
+                out[written++] = f != 0 ? f : (u8)'?';
+                if (f == 0) unmapped++;
             }
         }
         pos += n;

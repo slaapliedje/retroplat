@@ -123,3 +123,27 @@ wp_status utf8_validate(const u8 *s, u32 len, u32 *bad_offset)
     }
     return WP_OK;
 }
+
+/* U+00A0..U+00FF, one ASCII character each; ' ' where none is better. */
+static const char g_latin1_ascii[97] =
+    " !cL*Y|S\"ca\"--r-o+23'uP.,1o\"423?"     /* A0..BF */
+    "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYTs"      /* C0..DF */
+    "aaaaaaaceeeeiiiidnooooo/ouuuuyty";     /* E0..FF */
+
+u8 utf8_ascii_fallback(u32 cp)
+{
+    if (cp < 0x80) return (u8)cp;
+    if (cp >= 0xA0 && cp <= 0xFF) return (u8)g_latin1_ascii[cp - 0xA0];
+    switch (cp) {
+    case 0x2018: case 0x2019: case 0x201A: case 0x201B: case 0x2032: return (u8)'\'';
+    case 0x201C: case 0x201D: case 0x201E: case 0x2033: return (u8)'"';
+    case 0x2010: case 0x2011: case 0x2012: case 0x2013: case 0x2014: case 0x2015:
+    case 0x2212: return (u8)'-';
+    case 0x2026: return (u8)'.';
+    case 0x2022: case 0x2023: case 0x25CF: return (u8)'*';
+    case 0x2002: case 0x2003: case 0x2009: case 0x200A: case 0x202F: return (u8)' ';
+    case 0x20AC: return (u8)'E';
+    case 0x2122: return (u8)'T';
+    default: return 0;
+    }
+}

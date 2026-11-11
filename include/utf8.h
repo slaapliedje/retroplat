@@ -16,6 +16,13 @@
    replacement policy; this function never guesses. */
 u32 utf8_decode(const u8 *s, u32 len, u32 *cp_out);
 
+/* The nearest plain ASCII character to cp, for a machine whose character
+   set has no glyph for it: curly quotes to straight ones, dashes to a
+   hyphen, an ellipsis to a full stop, an accented Latin-1 letter to its
+   letter (e for e-acute) -- what a reader would write by hand. 0 where
+   there is no sensible one, and the caller prints its '?'. */
+u8 utf8_ascii_fallback(u32 cp);
+
 /* Encode cp into out, which must have room for up to 4 bytes. Returns
    bytes written (1..4), or 0 if cp is not a valid Unicode scalar value
    (a surrogate half, or greater than 0x10FFFF). */

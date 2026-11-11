@@ -137,6 +137,10 @@ typedef struct {
        which a caller must only leave when the whole window is its. */
     short  clip_on;
     short  clip[4];
+    /* Nonzero: plat_fill_polygon fills a row at a time (v_bar) instead
+       of v_fillarea, for a driver whose polygon fill cannot be trusted
+       -- SpeedoGDOS's FX80 writes to address 0 on one. */
+    short  polys_by_spans;
 } atari_gc;
 
 #endif /* WP_ATARI_METRICS_INTERNAL_H */

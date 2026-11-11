@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include <QString>
 #include <QColor>
+#include <QPen>
+#include <QPolygon>
 
 #include "metrics_qt_internal.h"
 
@@ -43,6 +45,39 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     if (qgc == NULL || qgc->p == NULL) return WP_ERR;
     qgc->p->fillRect((int)x, (int)y, (int)w, (int)h,
                      QColor((int)r, (int)g, (int)b));
+    return WP_OK;
+}
+
+/* Vector drawing (platform.h): Qt's own, antialiasing left as the
+   painter has it. Round joints and ends, as the other backends draw. */
+wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
+{
+    qt_gc *qgc = (qt_gc *)gc;
+    if (qgc == NULL || qgc->p == NULL) return WP_ERR;
+    if (n < 3) return WP_OK;
+    QPolygon poly((int)n);
+    for (u16 i = 0; i < n; i++) poly.setPoint((int)i, (int)xy[i * 2], (int)xy[i * 2 + 1]);
+    qgc->p->save();
+    qgc->p->setPen(Qt::NoPen);
+    qgc->p->setBrush(QColor((int)r, (int)g, (int)b));
+    qgc->p->drawPolygon(poly, Qt::OddEvenFill);
+    qgc->p->restore();
+    return WP_OK;
+}
+
+wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
+                             u8 r, u8 g, u8 b)
+{
+    qt_gc *qgc = (qt_gc *)gc;
+    if (qgc == NULL || qgc->p == NULL) return WP_ERR;
+    if (n < 2) return WP_OK;
+    QPolygon poly((int)n);
+    for (u16 i = 0; i < n; i++) poly.setPoint((int)i, (int)xy[i * 2], (int)xy[i * 2 + 1]);
+    qgc->p->save();
+    qgc->p->setPen(QPen(QColor((int)r, (int)g, (int)b), width > 1 ? (int)width : 0,
+                        Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    qgc->p->drawPolyline(poly);
+    qgc->p->restore();
     return WP_OK;
 }
 

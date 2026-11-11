@@ -20,6 +20,16 @@ u8   draw_host_last_shade(void);
 /* plat_draw_mono calls since the last draw_host_reset_fills. */
 u32  draw_host_mono_calls(void);
 
+/* plat_fill_polygon and plat_draw_polyline since the last
+   draw_host_reset_fills: how many of each, the last line's width and
+   colour, and the box round every point either was given (WP_FALSE
+   for none). */
+u32     draw_host_polygon_calls(void);
+u32     draw_host_polyline_calls(void);
+i32     draw_host_last_line_width(void);
+void    draw_host_last_line_rgb(u8 *rgb3);
+wp_bool draw_host_vector_box(i32 *x0, i32 *y0, i32 *x1, i32 *y1);
+
 /* The text plat_draw_text was given since the last
    draw_host_reset_text, the first DRAW_HOST_TEXT_MAX calls kept: where
    it went (x, y: the baseline's start) and the string, cut to 47 bytes. */

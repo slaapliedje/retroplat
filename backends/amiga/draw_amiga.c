@@ -195,6 +195,31 @@ wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
     return WP_OK;
 }
 
+/* Vector drawing (platform.h). Area fills need an AreaInfo and a TmpRas
+   the size of the screen in chip memory; spans through RectFill need
+   neither, and the shading pattern lines up from row to row because it
+   follows y. graphics.library has no wide lines: those go as polygons. */
+wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
+{
+    return plat_polygon_by_spans(gc, xy, n, r, g, b);
+}
+
+wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
+                             u8 r, u8 g, u8 b)
+{
+    amiga_gc *agc = (amiga_gc *)gc;
+    u16 i;
+
+    if (agc == NULL) return WP_ERR;
+    if (n < 2) return WP_OK;
+    if (width > 1) return plat_polyline_by_polygons(gc, xy, n, width, r, g, b);
+    SetAPen(agc->rp, rgb_to_pen_on(agc, r, g, b));
+    SetDrMd(agc->rp, JAM1);
+    Move(agc->rp, (LONG)xy[0], (LONG)xy[1]);
+    for (i = 1; i < n; i++) Draw(agc->rp, (LONG)xy[i * 2], (LONG)xy[i * 2 + 1]);
+    return WP_OK;
+}
+
 /* No blit worth having here: plat_draw_mono run by run. */
 wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                          const u16 *rows, u32 row_words, u8 r, u8 g, u8 b)

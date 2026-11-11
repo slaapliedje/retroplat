@@ -196,6 +196,64 @@ wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
     return WP_OK;
 }
 
+/* Vector drawing (platform.h): QuickDraw's own polygons, a grey in the
+   pattern plat_fill_shade picks. Its pen hangs below and right of the
+   line it draws, so lines wider than a pixel go as polygons, centred, as
+   on every other machine. */
+static void select_vector_pattern(u8 r, u8 g, u8 b)
+{
+    u8 grey = plat_grey_percent(r, g, b);
+
+    if (grey == 0) { select_fill_pattern(r, g, b); PenMode(patCopy); return; }
+    if (grey < 38) PenPat(&qd.ltGray);
+    else if (grey < 63) PenPat(&qd.gray);
+    else if (grey < 88) PenPat(&qd.dkGray);
+    else PenPat(&qd.black);
+    PenMode(patOr);
+}
+
+wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
+{
+    mac_gc *mgc = (mac_gc *)gc;
+    PolyHandle poly;
+    u16 i;
+
+    if (mgc == NULL) return WP_ERR;
+    if (n < 3) return WP_OK;
+    SetPort(mgc->window);
+    poly = OpenPoly();
+    MoveTo((short)xy[0], (short)xy[1]);
+    for (i = 1; i < n; i++) LineTo((short)xy[i * 2], (short)xy[i * 2 + 1]);
+    LineTo((short)xy[0], (short)xy[1]);
+    ClosePoly();
+    if (poly == NULL) return WP_NOMEM;
+    select_vector_pattern(r, g, b);
+    PaintPoly(poly);
+    KillPoly(poly);
+    PenMode(patCopy);
+    PenPat(&qd.black);
+    return WP_OK;
+}
+
+wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
+                             u8 r, u8 g, u8 b)
+{
+    mac_gc *mgc = (mac_gc *)gc;
+    u16 i;
+
+    if (mgc == NULL) return WP_ERR;
+    if (n < 2) return WP_OK;
+    if (width > 1) return plat_polyline_by_polygons(gc, xy, n, width, r, g, b);
+    SetPort(mgc->window);
+    PenSize(1, 1);
+    select_vector_pattern(r, g, b);
+    MoveTo((short)xy[0], (short)xy[1]);
+    for (i = 1; i < n; i++) LineTo((short)xy[i * 2], (short)xy[i * 2 + 1]);
+    PenMode(patCopy);
+    PenPat(&qd.black);
+    return WP_OK;
+}
+
 /* M15 Phase 5b: real QuickDraw CopyBits blit, dithered down to this
    backend's hard-capped 1-bit tier (a plain NewWindow, not NewCWindow --
    true color is out of scope). Each pixel's palette RGB is reduced to

@@ -51,6 +51,11 @@ static u32 g_grey_fills[256];
 static u32 g_mono_calls;
 static u32 g_shade_calls;
 static u8  g_last_shade;
+static u32 g_poly_calls, g_line_calls;
+static i32 g_line_width;
+static u8  g_line_rgb[3];
+static i32 g_box[4];
+static wp_bool g_have_box;
 
 u32 draw_host_shade_calls(void) { return g_shade_calls; }
 u8  draw_host_last_shade(void) { return g_last_shade; }
@@ -79,6 +84,52 @@ void draw_host_reset_fills(void)
     for (i = 0; i < 256; i++) g_grey_fills[i] = 0;
     g_mono_calls = 0;
     g_shade_calls = 0;
+    g_poly_calls = g_line_calls = 0;
+    g_line_width = 0;
+    g_have_box = WP_FALSE;
+}
+
+static void take_points(const i32 *xy, u16 n)
+{
+    u16 i;
+    for (i = 0; i < n; i++) {
+        i32 x = xy[i * 2], y = xy[i * 2 + 1];
+        if (!g_have_box) { g_box[0] = g_box[2] = x; g_box[1] = g_box[3] = y; g_have_box = WP_TRUE; }
+        if (x < g_box[0]) g_box[0] = x;
+        if (y < g_box[1]) g_box[1] = y;
+        if (x > g_box[2]) g_box[2] = x;
+        if (y > g_box[3]) g_box[3] = y;
+    }
+}
+
+wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
+{
+    WP_UNUSED(gc); WP_UNUSED(r); WP_UNUSED(g); WP_UNUSED(b);
+    g_poly_calls++;
+    take_points(xy, n);
+    return WP_OK;
+}
+
+wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width, u8 r, u8 g, u8 b)
+{
+    WP_UNUSED(gc);
+    g_line_calls++;
+    g_line_width = width;
+    g_line_rgb[0] = r; g_line_rgb[1] = g; g_line_rgb[2] = b;
+    take_points(xy, n);
+    return WP_OK;
+}
+
+u32 draw_host_polygon_calls(void) { return g_poly_calls; }
+u32 draw_host_polyline_calls(void) { return g_line_calls; }
+i32 draw_host_last_line_width(void) { return g_line_width; }
+void draw_host_last_line_rgb(u8 *rgb3) { rgb3[0] = g_line_rgb[0]; rgb3[1] = g_line_rgb[1]; rgb3[2] = g_line_rgb[2]; }
+
+wp_bool draw_host_vector_box(i32 *x0, i32 *y0, i32 *x1, i32 *y1)
+{
+    if (!g_have_box) return WP_FALSE;
+    *x0 = g_box[0]; *y0 = g_box[1]; *x1 = g_box[2]; *y1 = g_box[3];
+    return WP_TRUE;
 }
 
 wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,

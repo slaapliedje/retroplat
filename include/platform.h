@@ -210,6 +210,27 @@ wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
 wp_status plat_mono_by_runs(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                             const u16 *rows, u32 row_words, u8 r, u8 g, u8 b);
 
+/* Vector drawing (RetroWP's drawings, scaled to the device by the
+   caller): a filled polygon of n points, xy[2n], even-odd; and an open
+   polyline `width` pixels wide, round at its joints and ends. A mid grey
+   fills in the device's own pattern, as plat_fill_shade does, so a
+   two-colour screen or a printer keeps it (plat_grey_percent says which
+   colours are greys); other colours take the device's nearest. A
+   backend without a native polygon fill uses plat_polygon_by_spans,
+   which fills a row at a time through its plat_fill_rect and
+   plat_fill_shade; one whose wide lines are missing or unreliable (the
+   ST's GDOS drivers, the Amiga) uses plat_polyline_by_polygons, which
+   draws them through its plat_fill_polygon. src/polyfill.c. */
+wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b);
+wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
+                             u8 r, u8 g, u8 b);
+wp_status plat_polygon_by_spans(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b);
+wp_status plat_polyline_by_polygons(plat_gc *gc, const i32 *xy, u16 n, i32 width,
+                                    u8 r, u8 g, u8 b);
+/* 1..99 for a grey between near-white and near-black (its darkness, as
+   plat_fill_shade takes it), 0 for any other colour. */
+u8        plat_grey_percent(u8 r, u8 g, u8 b);
+
 wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                            const u8 *pixels, i32 src_width_px, i32 src_height_px,
                            const u8 palette[][3], u8 palette_count);

@@ -150,6 +150,11 @@ wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
     pxy[1] = (short)y;
     pxy[2] = (short)(x + w - 1);
     pxy[3] = (short)(y + h - 1);
+    /* A polygon filled by spans on a printer (polys_by_spans) comes here
+       a row at a time, and SpeedoGDOS's FX80 prints nothing for a
+       one-row pattern bar (a solid one prints): its patterned bars seem
+       to stop short of their last row. Such a row goes two rows tall. */
+    if (agc->polys_by_spans && h == 1) pxy[3] = (short)(y + 1);
     vsf_interior(agc->vdi, FIS_PATTERN);
     vsf_style(agc->vdi, style);
     vsf_color(agc->vdi, G_BLACK);
@@ -161,6 +166,70 @@ wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
     vsf_perimeter(agc->vdi, 1);
     vswr_mode(agc->vdi, MD_REPLACE);
     vsf_interior(agc->vdi, FIS_SOLID);
+    return WP_OK;
+}
+
+/* Vector drawing (platform.h). VDI fills a polygon natively; some VDIs
+   take no more than 128 points a call, so a longer one goes by spans.
+   A mid grey takes the pattern plat_fill_shade would, with the perimeter
+   off, so it survives a mono screen and a printer alike. Lines wider
+   than a pixel are drawn as polygons: SpeedoGDOS's FX80 driver wrote to
+   address 0 on vsl_width 3 under Hatari, and a polygon gives every
+   driver the same joints and ends. That driver's v_fillarea writes to
+   address 0 too (2026-11-10, likely the same fault): a gc can ask for
+   polygons by spans instead (atari_gc.polys_by_spans). */
+#define ATARI_POLY_MAX 128
+static short g_poly_pxy[ATARI_POLY_MAX * 2];
+
+wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
+{
+    atari_gc *agc = (atari_gc *)gc;
+    u8 grey = plat_grey_percent(r, g, b);
+    u16 i;
+
+    if (agc == NULL) return WP_ERR;
+    if (n < 3) return WP_OK;
+    if (n > ATARI_POLY_MAX || agc->polys_by_spans) return plat_polygon_by_spans(gc, xy, n, r, g, b);
+    for (i = 0; i < n * 2; i++) g_poly_pxy[i] = (short)xy[i];
+    if (grey != 0) {
+        short style = (short)(((i32)grey * 8 + 50) / 100);
+        if (style < 1) style = 1;
+        if (style > 8) style = 8;
+        vsf_interior(agc->vdi, FIS_PATTERN);
+        vsf_style(agc->vdi, style);
+        vsf_color(agc->vdi, G_BLACK);
+        vswr_mode(agc->vdi, MD_TRANS);
+    } else {
+        vsf_interior(agc->vdi, FIS_SOLID);
+        vsf_color(agc->vdi, rgb_to_vdi_color(r, g, b));
+    }
+    vsf_perimeter(agc->vdi, 0);
+    v_fillarea(agc->vdi, (short)n, g_poly_pxy);
+    vsf_perimeter(agc->vdi, 1);
+    vswr_mode(agc->vdi, MD_REPLACE);
+    vsf_interior(agc->vdi, FIS_SOLID);
+    return WP_OK;
+}
+
+wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
+                             u8 r, u8 g, u8 b)
+{
+    atari_gc *agc = (atari_gc *)gc;
+    u16 at = 0;
+
+    if (agc == NULL) return WP_ERR;
+    if (n < 2) return WP_OK;
+    if (width > 1) return plat_polyline_by_polygons(gc, xy, n, width, r, g, b);
+    vsl_width(agc->vdi, 1);
+    vsl_type(agc->vdi, 1);
+    vsl_color(agc->vdi, rgb_to_vdi_color(r, g, b));
+    /* In pieces of 128 points, each starting where the last ended. */
+    while (at + 1 < n) {
+        u16 k = (u16)(n - at > ATARI_POLY_MAX ? ATARI_POLY_MAX : n - at), i;
+        for (i = 0; i < k * 2; i++) g_poly_pxy[i] = (short)xy[at * 2 + i];
+        v_pline(agc->vdi, (short)k, g_poly_pxy);
+        at = (u16)(at + k - 1);
+    }
     return WP_OK;
 }
 

@@ -87,6 +87,59 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     return WP_OK;
 }
 
+/* Vector drawing (platform.h): GDI's own. A cosmetic or geometric pen
+   of the width asked, round at its joints and ends -- CreatePen's
+   default -- and an alternate-fill polygon with no outline. */
+wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
+{
+    w32_gc *wgc = (w32_gc *)gc;
+    POINT *pts;
+    HBRUSH brush, old_brush;
+    HGDIOBJ old_pen;
+    u16 i;
+
+    if (wgc == NULL || wgc->dc == NULL) return WP_ERR;
+    if (n < 3) return WP_OK;
+    pts = (POINT *)mem_alloc((u32)n * (u32)sizeof(POINT));
+    if (pts == NULL) return WP_NOMEM;
+    for (i = 0; i < n; i++) { pts[i].x = (LONG)xy[i * 2]; pts[i].y = (LONG)xy[i * 2 + 1]; }
+    brush = CreateSolidBrush(RGB(r, g, b));
+    if (brush == NULL) { mem_free(pts); return WP_ERR; }
+    old_brush = (HBRUSH)SelectObject(wgc->dc, brush);
+    old_pen = SelectObject(wgc->dc, GetStockObject(NULL_PEN));
+    SetPolyFillMode(wgc->dc, ALTERNATE);
+    Polygon(wgc->dc, pts, (int)n);
+    SelectObject(wgc->dc, old_pen);
+    SelectObject(wgc->dc, old_brush);
+    DeleteObject(brush);
+    mem_free(pts);
+    return WP_OK;
+}
+
+wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
+                             u8 r, u8 g, u8 b)
+{
+    w32_gc *wgc = (w32_gc *)gc;
+    POINT *pts;
+    HPEN pen;
+    HGDIOBJ old_pen;
+    u16 i;
+
+    if (wgc == NULL || wgc->dc == NULL) return WP_ERR;
+    if (n < 2) return WP_OK;
+    pts = (POINT *)mem_alloc((u32)n * (u32)sizeof(POINT));
+    if (pts == NULL) return WP_NOMEM;
+    for (i = 0; i < n; i++) { pts[i].x = (LONG)xy[i * 2]; pts[i].y = (LONG)xy[i * 2 + 1]; }
+    pen = CreatePen(PS_SOLID, width > 1 ? (int)width : 0, RGB(r, g, b));
+    if (pen == NULL) { mem_free(pts); return WP_ERR; }
+    old_pen = SelectObject(wgc->dc, pen);
+    Polyline(wgc->dc, pts, (int)n);
+    SelectObject(wgc->dc, old_pen);
+    DeleteObject(pen);
+    mem_free(pts);
+    return WP_OK;
+}
+
 /* GDI paints straight into whatever surface the DC names, and that surface
    is presented by whoever owns it -- the window manager after EndPaint, or
    a caller blitting a memory DC. There is nothing to flush. */

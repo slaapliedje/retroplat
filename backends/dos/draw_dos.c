@@ -217,6 +217,23 @@ wp_status plat_fill_shade(plat_gc *gc, i32 x, i32 y, i32 w, i32 h, u8 percent)
     return WP_OK;
 }
 
+/* Vector drawing (platform.h): text mode has nothing to draw a line
+   with; RetroWP shows a drawing as a labelled placeholder, as it does a
+   picture. */
+wp_status plat_fill_polygon(plat_gc *gc, const i32 *xy, u16 n, u8 r, u8 g, u8 b)
+{
+    WP_UNUSED(gc); WP_UNUSED(xy); WP_UNUSED(n); WP_UNUSED(r); WP_UNUSED(g); WP_UNUSED(b);
+    return WP_OK;
+}
+
+wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
+                             u8 r, u8 g, u8 b)
+{
+    WP_UNUSED(gc); WP_UNUSED(xy); WP_UNUSED(n); WP_UNUSED(width);
+    WP_UNUSED(r); WP_UNUSED(g); WP_UNUSED(b);
+    return WP_OK;
+}
+
 wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                           u8 r, u8 g, u8 b)
 {

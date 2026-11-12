@@ -6,18 +6,36 @@
 #include "utf8.h"
 #include "metrics_mac_internal.h"
 
+/* Mac Roman's upper half, as Unicode: 0x80 + i shows g_macroman_hi[i]
+   (the same table RetroWP's engine reads \\mac RTF with). */
+static const u16 g_macroman_hi[128] = {
+    0x00C4, 0x00C5, 0x00C7, 0x00C9, 0x00D1, 0x00D6, 0x00DC, 0x00E1,
+    0x00E0, 0x00E2, 0x00E4, 0x00E3, 0x00E5, 0x00E7, 0x00E9, 0x00E8,
+    0x00EA, 0x00EB, 0x00ED, 0x00EC, 0x00EE, 0x00EF, 0x00F1, 0x00F3,
+    0x00F2, 0x00F4, 0x00F6, 0x00F5, 0x00FA, 0x00F9, 0x00FB, 0x00FC,
+    0x2020, 0x00B0, 0x00A2, 0x00A3, 0x00A7, 0x2022, 0x00B6, 0x00DF,
+    0x00AE, 0x00A9, 0x2122, 0x00B4, 0x00A8, 0x2260, 0x00C6, 0x00D8,
+    0x221E, 0x00B1, 0x2264, 0x2265, 0x00A5, 0x00B5, 0x2202, 0x2211,
+    0x220F, 0x03C0, 0x222B, 0x00AA, 0x00BA, 0x03A9, 0x00E6, 0x00F8,
+    0x00BF, 0x00A1, 0x00AC, 0x221A, 0x0192, 0x2248, 0x2206, 0x00AB,
+    0x00BB, 0x2026, 0x00A0, 0x00C0, 0x00C3, 0x00D5, 0x0152, 0x0153,
+    0x2013, 0x2014, 0x201C, 0x201D, 0x2018, 0x2019, 0x00F7, 0x25CA,
+    0x00FF, 0x0178, 0x2044, 0x20AC, 0x2039, 0x203A, 0xFB01, 0xFB02,
+    0x2021, 0x00B7, 0x201A, 0x201E, 0x2030, 0x00C2, 0x00CA, 0x00C1,
+    0x00CB, 0x00C8, 0x00CD, 0x00CE, 0x00CF, 0x00CC, 0x00D3, 0x00D4,
+    0xF8FF, 0x00D2, 0x00DA, 0x00DB, 0x00D9, 0x0131, 0x02C6, 0x02DC,
+    0x00AF, 0x02D8, 0x02D9, 0x02DA, 0x00B8, 0x02DD, 0x02DB, 0x02C7
+};
+
 /* plat_utf8_to_native/plat_native_to_utf8 were pulled forward to Phase 1
    because the clipboard and file seams needed them to link -- same
    reasoning draw_amiga.c gives for doing the identical pull-forward in
    M9 Phase 1.
 
-   Unlike Amiga's ISO-8859-1 (a genuine 1:1 identity map for 0x80-0xFF,
-   not real extra work), Mac OS Roman is its own idiosyncratic ordering
-   with no simple arithmetic relationship to Unicode -- a real mapping
-   table remains future work, not assumed here. This follows Atari's own
-   precedent instead: ASCII (0x00-0x7F) passes through unchanged, and
-   every other codepoint becomes a single '?' fallback byte, counted in
-   *unmapped_count. A documented gap, not a silent one. */
+   Unlike Amiga's ISO-8859-1 (a 1:1 identity map for 0x80-0xFF), Mac OS
+   Roman is its own ordering: g_macroman_hi above, both ways. A
+   character it lacks takes utf8_ascii_fallback's nearest plain one, and
+   only one with none becomes '?', counted in *unmapped_count. */
 
 wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
                                u8 *out, u32 out_cap, u32 *out_len,
@@ -43,9 +61,15 @@ wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
         if (cp <= 0x7F) {
             out[written++] = (u8)cp;
         } else {
-            u8 f = utf8_ascii_fallback(cp);   /* the nearest plain character, if any */
-            out[written++] = f != 0 ? f : (u8)'?';
-            if (f == 0) unmapped++;
+            u32 k;
+            for (k = 0; k < 128 && g_macroman_hi[k] != cp; k++) {}
+            if (k < 128) {
+                out[written++] = (u8)(0x80 + k);   /* the Mac Roman set has it */
+            } else {
+                u8 f = utf8_ascii_fallback(cp);   /* the nearest plain character, if any */
+                out[written++] = f != 0 ? f : (u8)'?';
+                if (f == 0) unmapped++;
+            }
         }
         pos += n;
     }
@@ -64,7 +88,14 @@ wp_status plat_native_to_utf8(const u8 *native, u32 len,
     if (native == NULL || out == NULL) return WP_ERR;
 
     for (i = 0; i < len && written < out_cap; i++) {
-        out[written++] = (native[i] <= 0x7F) ? native[i] : (u8)'?';
+        u32 cp = native[i] <= 0x7F ? native[i] : g_macroman_hi[native[i] - 0x80];
+        u8 enc[4];
+        u32 n;
+        if (cp == 0) cp = '?';
+        n = utf8_encode(cp, enc);
+        if (written + n > out_cap) break;
+        memcpy(out + written, enc, n);
+        written += n;
     }
 
     if (out_len) *out_len = written;

@@ -5,13 +5,36 @@
 #include "utf8.h"
 #include "metrics_atari_internal.h"
 
-/* No real Atari-ST-high-ASCII mapping table yet -- ASCII (0x00-0x7F)
-   passes through unchanged (already charset-compatible), and every
-   other codepoint (regardless of its UTF-8 byte length) becomes exactly
-   one '?' fallback byte, counted in *unmapped_count. Sufficient and
-   correct for this milestone's ASCII sample document; a real high-ASCII
-   table is a documented gap, not a silent one -- see
-   docs/atari-platform.md. */
+/* The Atari ST character set's upper half, as Unicode: 0x80 + i shows
+   g_atari_hi[i]; 0 for a code not mapped here (the Hebrew block 0xC2-0xDC
+   and a few symbols whose glyphs could not be checked), which leaves its
+   character to utf8_ascii_fallback. The Latin-1 half agrees with
+   EmuTOS's own latin1-to-atarist table (tools/bug.c, read as a
+   specification); the rest is the standard ST set -- Greek, maths, the
+   ligatures. */
+static const u16 g_atari_hi[128] = {
+    0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,   /* 80 */
+    0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+    0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,   /* 90 */
+    0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x00DF, 0x0192,
+    0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,   /* A0 */
+    0x00BF, 0,      0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+    0x00E3, 0x00F5, 0x00D8, 0x00F8, 0x0153, 0x0152, 0x00C0, 0x00C3,   /* B0 */
+    0x00D5, 0x00A8, 0x00B4, 0x2020, 0x00B6, 0x00A9, 0x00AE, 0x2122,
+    0x0133, 0x0132, 0,      0,      0,      0,      0,      0,        /* C0 */
+    0,      0,      0,      0,      0,      0,      0,      0,
+    0,      0,      0,      0,      0,      0,      0,      0,        /* D0 */
+    0,      0,      0,      0,      0,      0x00A7, 0,      0x221E,
+    0x03B1, 0x03B2, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,   /* E0 */
+    0x03A6, 0x0398, 0x03A9, 0x03B4, 0,      0,      0x2208, 0x2229,
+    0x2261, 0x00B1, 0x2265, 0x2264, 0,      0,      0x00F7, 0x2248,   /* F0 */
+    0x00B0, 0x2022, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x00B3, 0x00AF
+};
+
+/* Unicode to the Atari set: ASCII as itself, the upper half through
+   g_atari_hi above, and a character the set lacks as
+   utf8_ascii_fallback's nearest plain one; only one with none becomes
+   '?', counted in *unmapped_count. */
 wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
                                u8 *out, u32 out_cap, u32 *out_len,
                                u32 *unmapped_count)
@@ -36,9 +59,15 @@ wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
         if (cp <= 0x7F) {
             out[written++] = (u8)cp;
         } else {
-            u8 f = utf8_ascii_fallback(cp);   /* the nearest plain character, if any */
-            out[written++] = f != 0 ? f : (u8)'?';
-            if (f == 0) unmapped++;
+            u32 k;
+            for (k = 0; k < 128 && g_atari_hi[k] != cp; k++) {}
+            if (k < 128) {
+                out[written++] = (u8)(0x80 + k);   /* the Atari set has it */
+            } else {
+                u8 f = utf8_ascii_fallback(cp);   /* the nearest plain character, if any */
+                out[written++] = f != 0 ? f : (u8)'?';
+                if (f == 0) unmapped++;
+            }
         }
         pos += n;
     }
@@ -48,10 +77,9 @@ wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
     return WP_OK;
 }
 
-/* Inverse direction: native Atari charset input (keyboard/clipboard/file)
-   to UTF-8. Same ASCII-only scope for now -- bytes >= 0x80 aren't a
-   valid single-byte-to-codepoint mapping yet, so they're dropped in
-   favor of a literal '?' rather than emitting a wrong codepoint. */
+/* The other way, for keyboard, clipboard and file input: a German or
+   French keyboard's accented keys arrive as the set's upper-half codes,
+   which g_atari_hi turns into their characters; an unmapped one is '?'. */
 wp_status plat_native_to_utf8(const u8 *native, u32 len,
                                u8 *out, u32 out_cap, u32 *out_len)
 {
@@ -61,7 +89,14 @@ wp_status plat_native_to_utf8(const u8 *native, u32 len,
     if (native == NULL || out == NULL) return WP_ERR;
 
     for (i = 0; i < len && written < out_cap; i++) {
-        out[written++] = (native[i] <= 0x7F) ? native[i] : (u8)'?';
+        u32 cp = native[i] <= 0x7F ? native[i] : g_atari_hi[native[i] - 0x80];
+        u8 enc[4];
+        u32 n;
+        if (cp == 0) cp = '?';
+        n = utf8_encode(cp, enc);
+        if (written + n > out_cap) break;
+        memcpy(out + written, enc, n);
+        written += n;
     }
 
     if (out_len) *out_len = written;

@@ -120,10 +120,6 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
     u32 n, out_len, unmapped;
     wp_status st;
 
-    WP_UNUSED(r);
-    WP_UNUSED(g);
-    WP_UNUSED(b);
-
     if (mgc == NULL || mf == NULL) return WP_ERR;
 
     n = (len < (u32)sizeof(buf)) ? len : (u32)sizeof(buf);
@@ -135,7 +131,11 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
     TextSize(mf->size);
     TextFace((short)mf->style);
     MoveTo((short)x, (short)y);
+    /* One bit: a light colour is white -- the text clears its pixels
+       (srcBic), as white lettering on a dark bar needs -- else black. */
+    if (plat_luma_percent(r, g, b) < 50) TextMode(srcBic);
     DrawText(buf, 0, (short)out_len);
+    TextMode(srcOr);
     return WP_OK;
 }
 

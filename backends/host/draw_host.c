@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include <stddef.h>
+#include <string.h>
 #include "platform.h"
 #include "draw_host.h"
+#include "utf8.h"
 
 /* No real drawing surface on the host backend -- glyph draw only notes
    what it was asked for, so engine/layout code can link and run headless
@@ -150,4 +152,25 @@ wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
 void plat_gc_flush(plat_gc *gc)
 {
     WP_UNUSED(gc);
+}
+
+/* The host's own character set, for input that is not UTF-8 -- a data
+   file from a vintage machine, say -- is Latin-1: each byte its own
+   code point. (Text the host draws is already UTF-8; nothing calls the
+   other direction here.) */
+wp_status plat_native_to_utf8(const u8 *native, u32 len,
+                              u8 *out, u32 out_cap, u32 *out_len)
+{
+    u32 i, w = 0;
+
+    if (native == NULL || out == NULL) return WP_ERR;
+    for (i = 0; i < len; i++) {
+        u8 enc[4];
+        u32 n = utf8_encode(native[i], enc);
+        if (w + n > out_cap) break;
+        memcpy(out + w, enc, n);
+        w += n;
+    }
+    if (out_len != NULL) *out_len = w;
+    return WP_OK;
 }

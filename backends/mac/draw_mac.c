@@ -132,8 +132,11 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
     TextFace((short)mf->style);
     MoveTo((short)x, (short)y);
     /* One bit: a light colour is white -- the text clears its pixels
-       (srcBic), as white lettering on a dark bar needs -- else black. */
-    if (plat_luma_percent(r, g, b) < 50) TextMode(srcBic);
+       (srcBic), as white lettering on a dark bar needs -- else black.
+       Brightness itself, as the image path below judges it: not
+       plat_luma_percent, a fill's shade, which answers 0 for black and
+       white alike and so drew all black text white. */
+    if ((u32)r + (u32)g + (u32)b >= 384u) TextMode(srcBic);
     DrawText(buf, 0, (short)out_len);
     TextMode(srcOr);
     return WP_OK;

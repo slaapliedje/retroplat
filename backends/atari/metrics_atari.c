@@ -641,6 +641,7 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     if (pt < 1) pt = 1;
     f->point_size = pt;
     f->style_flags = style_flags;
+    plat_paper_face_init(&f->paper, utf8_font_name, name_len, size_twips, style_flags);
 
     *out = (plat_font *)f;
     return WP_OK;
@@ -718,6 +719,7 @@ wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
     short effects[10];
 
     if (af == NULL || out == NULL) return WP_ERR;
+    if (plat_metrics_paper()) { plat_paper_metrics(&af->paper, out); return WP_OK; }
 
     /* vst_point selects the point size (required before querying font
        info); its own charw/cellh outputs are no longer used for
@@ -765,6 +767,7 @@ wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
     wp_status st;
 
     if (af == NULL || width_twips_out == NULL) return WP_ERR;
+    if (plat_metrics_paper()) return plat_paper_measure(&af->paper, utf8, len, width_twips_out);
 
     n = (len < sizeof(buf) - 1) ? len : (u32)(sizeof(buf) - 1);
     /* No real Atari-ST-charset mapping table yet (plat_utf8_to_native is

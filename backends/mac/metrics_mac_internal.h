@@ -3,6 +3,7 @@
 #define WP_MAC_METRICS_INTERNAL_H
 
 #include "types.h"
+#include "papermetrics.h"
 
 /* Private to platform/mac -- shared between metrics_mac.c (owns the
    twips<->pixel conversion and the font/measuring-port implementation),
@@ -39,6 +40,7 @@ typedef struct {
     short fontNum;
     short size;
     short style;
+    plat_paper_face paper;   /* how it measures with paper metrics on */
 } mac_font;
 
 /* plat_gc for this backend: the destination WindowPtr whose port

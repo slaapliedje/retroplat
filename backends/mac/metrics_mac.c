@@ -190,6 +190,7 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
        document model's own SUPER/SUB never reach this seam -- not mapped,
        the same documented gap metrics_atari.c/metrics_amiga.c each
        already have for their own target's effects bits. */
+    plat_paper_face_init(&f->paper, utf8_font_name, name_len, size_twips, style_flags);
 
     *out = (plat_font *)f;
     return WP_OK;
@@ -207,6 +208,7 @@ wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
     FontInfo info;
 
     if (mf == NULL || out == NULL) return WP_ERR;
+    if (plat_metrics_paper()) { plat_paper_metrics(&mf->paper, out); return WP_OK; }
     if (!ensure_metrics_port()) return WP_ERR;
 
     GetPort(&savePort);
@@ -232,6 +234,7 @@ wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
     wp_status st;
 
     if (mf == NULL || width_twips_out == NULL) return WP_ERR;
+    if (plat_metrics_paper()) return plat_paper_measure(&mf->paper, utf8, len, width_twips_out);
     if (!ensure_metrics_port()) return WP_ERR;
 
     n = (len < (u32)sizeof(buf)) ? len : (u32)sizeof(buf);

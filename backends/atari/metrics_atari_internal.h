@@ -4,6 +4,7 @@
 
 #include <gem.h>
 #include "types.h"
+#include "papermetrics.h"
 
 #include "gemcompat.h"   /* MFDB_SET_ADDR, OB_SPEC_*: the two GEMs' differences */
 
@@ -71,6 +72,7 @@ typedef struct {
     u16   style_flags;
     short face_id;     /* vst_font's argument: 1 is the system font, any
                           other a GDOS face found by plat_font_open */
+    plat_paper_face paper;   /* how it measures with paper metrics on */
 } atari_font;
 
 /* Applies point size + effects (bold/italic/underline) to vdi's own

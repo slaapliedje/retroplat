@@ -6,6 +6,7 @@
 #include <graphics/rastport.h>
 #include <intuition/screens.h>
 #include "types.h"
+#include "papermetrics.h"
 
 /* Private to platform/amiga -- shared between metrics_amiga.c (owns the
    twips<->pixel conversion and the lazily-queried real screen DPI plus a
@@ -49,6 +50,7 @@ i32 amiga_px_to_twips_y(i32 px);
 typedef struct {
     struct TextFont *tf;
     wp_bool owns_font;
+    plat_paper_face paper;   /* how it measures with paper metrics on */
 } amiga_font;
 
 /* plat_gc for this backend: the destination RastPort (the editor object's

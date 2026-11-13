@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include "platform.h"
 #include "utf8.h"
+#include "papermetrics.h"
 
 /* Fake fixed-cell monospace metrics: no real font system, deterministic
    round numbers so layout code can hand-verify wrap points against them
@@ -10,6 +11,7 @@
 typedef struct {
     i32 size_twips;
     u16 style_flags;
+    plat_paper_face paper;   /* how it measures with paper metrics on */
 } host_font;
 
 wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
@@ -17,13 +19,11 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
 {
     host_font *f;
 
-    WP_UNUSED(utf8_font_name);
-    WP_UNUSED(name_len);
-
     f = (host_font *)mem_alloc((u32)sizeof(host_font));
     if (f == NULL) return WP_NOMEM;
     f->size_twips = size_twips;
     f->style_flags = style_flags;
+    plat_paper_face_init(&f->paper, utf8_font_name, name_len, size_twips, style_flags);
     *out = (plat_font *)f;
     return WP_OK;
 }
@@ -60,6 +60,7 @@ wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
     host_font *hf = (host_font *)f;
 
     if (hf == NULL || out == NULL) return WP_ERR;
+    if (plat_metrics_paper()) { plat_paper_metrics(&hf->paper, out); return WP_OK; }
     out->ascent = hf->size_twips;
     out->descent = hf->size_twips / 4;
     out->leading = 0;
@@ -83,6 +84,7 @@ wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
     if (hf == NULL || width_twips_out == NULL) return WP_ERR;
 
     g_measure_call_count++;
+    if (plat_metrics_paper()) return plat_paper_measure(&hf->paper, utf8, len, width_twips_out);
 
     cell_width = hf->size_twips / 2;
     cp_count = utf8_cp_count(utf8, len);

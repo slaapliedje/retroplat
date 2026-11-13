@@ -160,6 +160,14 @@ i32 plat_font_pick(const char *(*name_at)(u32 index, void *user), void *user, u3
 wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
                              i32 *width_twips_out);
 
+/* Paper metrics (papermetrics.h): on, every face is measured as the
+   nearest standard PostScript face would print it -- widths and a 1.2 em
+   line -- and the backend's own fonts only draw, so a layout is the
+   printed one on any screen. Off by default; a backend measuring in
+   character cells ignores it. Portable: src/papermetrics.c. */
+void    plat_metrics_set_paper(wp_bool on);
+wp_bool plat_metrics_paper(void);
+
 
 /* ------------------------------------------------------------------ */
 /* Glyph draw                                                           */

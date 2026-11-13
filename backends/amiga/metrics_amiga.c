@@ -313,6 +313,7 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
         f->tf = GfxBase->DefaultFont;
         f->owns_font = WP_FALSE;
     }
+    plat_paper_face_init(&f->paper, utf8_font_name, name_len, size_twips, style_flags);
 
     *out = (plat_font *)f;
     return WP_OK;
@@ -332,6 +333,7 @@ wp_status plat_font_metrics_get(plat_font *f, plat_font_metrics *out)
     amiga_font *af = (amiga_font *)f;
 
     if (af == NULL || af->tf == NULL || out == NULL) return WP_ERR;
+    if (plat_metrics_paper()) { plat_paper_metrics(&af->paper, out); return WP_OK; }
 
     /* tf_Baseline: distance from the top of the character cell to the
        baseline, in pixels (real TextFont field, graphics/text.h) --
@@ -355,6 +357,7 @@ wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
     WORD px_width;
 
     if (af == NULL || af->tf == NULL || width_twips_out == NULL) return WP_ERR;
+    if (plat_metrics_paper()) return plat_paper_measure(&af->paper, utf8, len, width_twips_out);
 
     ensure_metrics_rp();
     if (g_metrics_bitmap == NULL) return WP_ERR;

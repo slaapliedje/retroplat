@@ -13,4 +13,8 @@
 u32  metrics_host_measure_call_count(void);
 void metrics_host_reset_measure_count(void);
 
+/* Faces asked for smaller than this open at this size (a screen whose
+   bitmap fonts stop there); 0 for none, the default. */
+void metrics_host_set_min_size(i32 size_twips);
+
 #endif /* WP_METRICS_HOST_H */

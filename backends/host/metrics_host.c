@@ -14,6 +14,16 @@ typedef struct {
     plat_paper_face paper;   /* how it measures with paper metrics on */
 } host_font;
 
+/* metrics_host.h: the smallest face there is, as a screen of bitmap
+   fonts has one (the ST's); 0, the default, for any size. Paper metrics
+   still answer for the size asked. */
+static i32 g_min_size_twips = 0;
+
+void metrics_host_set_min_size(i32 size_twips)
+{
+    g_min_size_twips = size_twips;
+}
+
 wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
                           i32 size_twips, u16 style_flags, plat_font **out)
 {
@@ -21,7 +31,7 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
 
     f = (host_font *)mem_alloc((u32)sizeof(host_font));
     if (f == NULL) return WP_NOMEM;
-    f->size_twips = size_twips;
+    f->size_twips = size_twips < g_min_size_twips ? g_min_size_twips : size_twips;
     f->style_flags = style_flags;
     plat_paper_face_init(&f->paper, utf8_font_name, name_len, size_twips, style_flags);
     *out = (plat_font *)f;

@@ -94,32 +94,46 @@ wp_status plat_native_to_utf8(const u8 *native, u32 len,
    only ever asked for black text on the theme's normal background so
    far, same scope note draw_atari.c's own version carries. */
 /*
-   Pure white and pure black stay the theme's BACKGROUNDPEN and TEXTPEN
-   whatever the depth -- the page and its text look as the user's
-   Workbench says. Anything else, on a screen of 16 colors or more under
-   graphics.library V39+, is the nearest pen the screen already has
-   (FindColor: nothing allocated, nothing to release), which is what lets
-   a grey be grey; shallower screens, and Kickstart 2.x, keep the
-   brightness rule. */
+   Pure white is the theme's SHINEPEN -- paper is white, as in every
+   Amiga word processor, where the Workbench's grey BACKGROUNDPEN made
+   the page grey -- and pure black its TEXTPEN. Anything else, on a
+   screen of 16 colors or more under graphics.library V39+, is the
+   nearest pen the screen already has (FindColor: nothing allocated,
+   nothing to release), which is what lets a grey be grey. Shallower
+   screens, and Kickstart 2.x, choose among the theme's own pens by
+   brightness: the dark ones the text pen, the middle the background
+   grey, the light ones white -- which is the Workbench's own 3D look
+   when the face is a mid grey, its highlight white and its shadow
+   dark. */
+static UBYTE pen_by_brightness(struct DrawInfo *dri, u32 luminance)
+{
+    if (luminance < 400) return (UBYTE)dri->dri_Pens[TEXTPEN];
+    if (luminance <= 650) return (UBYTE)dri->dri_Pens[BACKGROUNDPEN];
+    return (UBYTE)dri->dri_Pens[SHINEPEN];
+}
+
 static UBYTE rgb_to_pen_on(const amiga_gc *agc, u8 r, u8 g, u8 b)
 {
     struct DrawInfo *dri = agc->dri;
     u32 luminance = (u32)r + (u32)g + (u32)b;
 
-    if (luminance != 0 && luminance != 765 && agc->screen != NULL &&
+    if (luminance == 765) return (UBYTE)dri->dri_Pens[SHINEPEN];
+    if (luminance != 0 && agc->screen != NULL &&
         agc->screen->BitMap.Depth >= 4 && GfxBase->LibNode.lib_Version >= 39) {
         LONG pen = FindColor(agc->screen->ViewPort.ColorMap,
                              (ULONG)r * 0x01010101UL, (ULONG)g * 0x01010101UL,
                              (ULONG)b * 0x01010101UL, -1);
         if (pen >= 0) return (UBYTE)pen;
     }
-    return (UBYTE)dri->dri_Pens[(luminance < 384) ? TEXTPEN : BACKGROUNDPEN];
+    return pen_by_brightness(dri, luminance);
 }
 
+/* Text: dark text in the text pen, light text (white lettering on a dark
+   bar) in white. */
 static UBYTE rgb_to_pen(struct DrawInfo *dri, u8 r, u8 g, u8 b)
 {
     u32 luminance = (u32)r + (u32)g + (u32)b;
-    return (UBYTE)dri->dri_Pens[(luminance < 384) ? TEXTPEN : BACKGROUNDPEN];
+    return (UBYTE)dri->dri_Pens[(luminance < 384) ? TEXTPEN : SHINEPEN];
 }
 
 wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,

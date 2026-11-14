@@ -301,7 +301,30 @@ wp_status plat_font_open(const u8 *utf8_font_name, u32 name_len,
     ta.ta_Style = (UBYTE)map_style(style_flags);
     ta.ta_Flags = 0;
 
-    f->tf = OpenDiskFont(&ta);
+    f->tf = NULL;
+    if (GfxBase->LibNode.lib_Version >= 39) {
+        /* The screen's resolution each way (TA_DeviceDPI): an outline
+           face (CGTimes and kin through diskfont) is then shaped for the
+           screen's pixels -- on a 640x256 screen, whose pixels are twice
+           as tall as wide, as wide as its type is, where by height alone
+           it came out half as wide. A bitmap face is unaffected. From
+           Kickstart 3.0 only: 2.04's and 2.05's diskfont answered the
+           tagged request with a face whose words overran a narrow column
+           (the layout and help self-checks failed under both). */
+        struct TTextAttr tta;
+        struct TagItem tags[2];
+        tags[0].ti_Tag = TA_DeviceDPI;
+        tags[0].ti_Data = ((ULONG)g_dpi_x << 16) | (ULONG)g_dpi_y;
+        tags[1].ti_Tag = TAG_DONE;
+        tags[1].ti_Data = 0;
+        tta.tta_Name = ta.ta_Name;
+        tta.tta_YSize = ta.ta_YSize;
+        tta.tta_Style = (UBYTE)(ta.ta_Style | FSF_TAGGED);
+        tta.tta_Flags = ta.ta_Flags;
+        tta.tta_Tags = tags;
+        f->tf = OpenDiskFont((struct TextAttr *)&tta);
+    }
+    if (f->tf == NULL) f->tf = OpenDiskFont(&ta);
     f->owns_font = (wp_bool)(f->tf != NULL ? WP_TRUE : WP_FALSE);
 
     if (f->tf == NULL) {

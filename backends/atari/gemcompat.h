@@ -124,7 +124,7 @@
  * the ST it is nothing at all -- a 68000 has one address space and the
  * question does not arise. */
 #ifdef GEM4XE_APP_GEM_H
-#  define WP_AES_NEAR __near
+#  define WP_AES_NEAR NEAR             /* portab.h: __near on the 65C816, nothing on the 6502 */
 #else
 #  define WP_AES_NEAR
 #endif

@@ -137,7 +137,11 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
        docs/atari-platform.md's own ST-High section) -- but it's still
        the only correct way to guarantee agc->vdi draws at the font
        plat_font_open was actually asked for, rather than relying on
-       both handles coincidentally agreeing, so it stays. */
+       both handles coincidentally agreeing, so it stays.
+       It also keeps a printer alive: under SpeedoGDOS on TOS 1.62,
+       2.06 and 3.06, v_gtext on a printer workstation before any
+       vst_font bus-errors in the ROM (Hatari, 2026-11-15; vst_font(h, 1)
+       first, then either vst_point or vst_height, prints cleanly). */
     atari_select_font(agc->vdi, af);
     vst_color(agc->vdi, rgb_to_vdi_color(r, g, b));
     /* Transparent: in replace mode v_gtext paints each character cell's

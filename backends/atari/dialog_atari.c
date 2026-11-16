@@ -37,11 +37,16 @@
     (0x00020000L | ((long)G_BLACK << 12) | ((long)G_BLACK << 8) | 0x0080L | \
      ((long)IP_SOLID << 4) | (long)G_WHITE)
 
-static OBJECT g_dialog_tree[WP_DIALOG_OBJ_COUNT];
-static char   g_dialog_title_buf[40];
-static char   g_dialog_option_bufs[WP_DIALOG_MAX_OPTIONS][32];
-static char   g_dialog_ok_buf[] = "  OK  ";
-static char   g_dialog_cancel_buf[] = "Cancel";
+/* WP_AES_NEAR: form_do and objc_draw read the tree and its strings in
+   place, by a 16-bit address in bank $00, on gem4xe (gemcompat.h). They
+   were plain statics, which the large data model puts in far memory, so
+   a choice of two or more there would have drawn whatever sat at the
+   same offset in bank $00. */
+static WP_AES_NEAR OBJECT g_dialog_tree[WP_DIALOG_OBJ_COUNT];
+static WP_AES_NEAR char   g_dialog_title_buf[40];
+static WP_AES_NEAR char   g_dialog_option_bufs[WP_DIALOG_MAX_OPTIONS][32];
+static WP_AES_NEAR char   g_dialog_ok_buf[] = "  OK  ";
+static WP_AES_NEAR char   g_dialog_cancel_buf[] = "Cancel";
 
 /* ASCII-only, same limitation plat_utf8_to_native already documents
    elsewhere in this backend (draw_atari.c) -- a real ISO-8859/ATASCII

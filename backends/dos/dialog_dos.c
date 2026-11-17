@@ -226,6 +226,13 @@ static u32 choice_in_box(const u8 *title, u32 title_len, const u8 * const *label
     return *cancelled ? 0 : (u32)(key - '1');
 }
 
+/* platform.h's Cancel rule: a caller's own "Cancel" option is the way
+   out, so picking it answers cancelled. Esc cancels as well. */
+static wp_bool is_cancel_label(const u8 *label, u32 len)
+{
+    return (wp_bool)(len == 6u && memcmp(label, "Cancel", 6) == 0);
+}
+
 /* Lists up to 9 options as "1)Label 2)Label ..." on the same bottom-row
    prompt -- a single-digit key (1-9) selects, Enter takes default_index,
    Escape cancels -- or, when
@@ -253,6 +260,8 @@ wp_status plat_dialog_choice(plat_window *parent,
         wp_bool cancelled = WP_TRUE;
         u32 idx = choice_in_box(title_utf8, title_len, option_labels_utf8, option_label_lens,
                                 option_count, default_index, &cancelled);
+        if (!cancelled && is_cancel_label(option_labels_utf8[idx], option_label_lens[idx]))
+            cancelled = WP_TRUE;
         if (out_cancelled) *out_cancelled = cancelled;
         if (!cancelled && out_index) *out_index = idx;
         return WP_OK;
@@ -292,7 +301,8 @@ wp_status plat_dialog_choice(plat_window *parent,
         if (key >= '1' && key <= '9') {
             u32 idx = (u32)(key - '1');
             if (idx < option_count) {
-                if (out_cancelled) *out_cancelled = WP_FALSE;
+                if (out_cancelled)
+                    *out_cancelled = is_cancel_label(option_labels_utf8[idx], option_label_lens[idx]);
                 if (out_index) *out_index = idx;
                 dialog_clear_row();
                 return WP_OK;

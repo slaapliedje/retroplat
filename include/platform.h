@@ -295,7 +295,15 @@ wp_status plat_dialog_message(plat_window *parent, plat_dialog_kind kind,
    reason to skip a target when it's actually being built). No free-text
    entry variant exists -- nothing in this project's current feature set
    needs one yet (font size and alignment are both small, fixed,
-   pre-enumerated lists). */
+   pre-enumerated lists).
+
+   Cancel, one rule for every backend: a choice of two or more always
+   has exactly one way out. If the caller lists an option labelled
+   exactly "Cancel", that option IS the way out -- the backend adds no
+   second Cancel of its own, and choosing it (or the platform's cancel
+   key) answers *out_cancelled = WP_TRUE. default_index may name it, and
+   then the platform's default key cancels. Otherwise the backend offers
+   its own Cancel. A choice of one is a message, with no Cancel. */
 wp_status plat_dialog_choice(plat_window *parent,
                               const u8 *title_utf8, u32 title_len,
                               const u8 * const *option_labels_utf8,

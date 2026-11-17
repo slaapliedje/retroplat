@@ -133,7 +133,7 @@ wp_status plat_dialog_choice(plat_window *parent,
     /* A caller that already offers "Cancel" (the unsaved-changes
        question does) gets no second one: two Cancel buttons were drawn
        under System 7.5.3. Its own button is then the one Esc presses,
-       and what it means stays the caller's business. */
+       and it answers cancelled (platform.h's Cancel rule). */
     g_choice_cancel = 0;
     for (i = 0; i < option_count; i++) {
         if (option_label_lens[i] == 6u && memcmp(option_labels_utf8[i], k_cancel, 6) == 0) {
@@ -220,7 +220,7 @@ wp_status plat_dialog_choice(plat_window *parent,
     DisposeDialog(dlg);   /* the item list with it */
     SetPort(saved);
 
-    if (with_cancel && (u32)hit == buttons) {
+    if (hit == g_choice_cancel) {         /* ours, or the caller's "Cancel" */
         if (out_cancelled) *out_cancelled = WP_TRUE;
         return WP_OK;
     }

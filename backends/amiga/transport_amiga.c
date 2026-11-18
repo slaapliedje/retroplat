@@ -303,8 +303,9 @@ static wp_status serial_write(plat_transport *t, const u8 *data, u32 len,
    base in SocketBase, which each function below points at its
    connection's base first. The socket is non-blocking throughout and
    every wait is a WaitSelect with the caller's timeout, so nothing here
-   blocks past it except the name lookup, which bsdsocket offers only
-   blocking. Kept small in stack: a RUN-launched program has 4 KB.
+   blocks past it except the name lookup: a dotted address is taken as it
+   is, and only a real name goes to gethostbyname, which has no timeout
+   and CAN BLOCK when the DNS server is unreachable. Kept small in stack: a RUN-launched program has 4 KB.
    (The name SocketBase is #defined to one of this file's own at the top,
    so an application's SocketBase cannot collide with it.) */
 struct Library *SocketBase;   /* wp_amiga_socket_base: see the #define */
@@ -328,17 +329,25 @@ static void tcp_close(amiga_tcp *t)
    1 ready, 0 timed out, -1 failed. */
 static int tcp_wait(LONG fd, int want_write, u32 ms)
 {
-    fd_set set;
-    struct timeval tv;
-    LONG r;
+    u32 t0 = plat_ticks_ms();
 
-    FD_ZERO(&set);
-    FD_SET(fd, &set);
-    tv.tv_sec = (long)(ms / 1000u);
-    tv.tv_usec = (long)((ms % 1000u) * 1000u);
-    r = WaitSelect(fd + 1, want_write ? NULL : &set, want_write ? &set : NULL,
-                   NULL, &tv, NULL);
-    return r > 0 ? 1 : (r == 0 ? 0 : -1);
+    for (;;) {
+        fd_set set;
+        struct timeval tv;
+        u32 left = ms - PLAT_TICKS_SINCE(t0);
+        LONG r;
+
+        if (PLAT_TICKS_PASSED(t0, ms)) left = 0;
+        FD_ZERO(&set);
+        FD_SET(fd, &set);
+        tv.tv_sec = (long)(left / 1000u);
+        tv.tv_usec = (long)((left % 1000u) * 1000u);
+        r = WaitSelect(fd + 1, want_write ? NULL : &set, want_write ? &set : NULL,
+                       NULL, &tv, NULL);
+        if (r < 0 && Errno() == EINTR && !PLAT_TICKS_PASSED(t0, ms))
+            continue;               /* interrupted: wait out what is left */
+        return r > 0 ? 1 : (r == 0 ? 0 : -1);
+    }
 }
 
 static wp_status tcp_open(const char *hostport, u32 connect_timeout_ms,
@@ -358,7 +367,13 @@ static wp_status tcp_open(const char *hostport, u32 connect_timeout_ms,
     if (n >= sizeof(host)) return WP_ERR;
     memcpy(host, hostport, n);
     host[n] = '\0';
-    if (!parse_baud(colon + 1, &port) || port > 65535u) return WP_ERR;
+    {
+        const char *q;
+
+        for (q = colon + 1; *q >= '0' && *q <= '9' && port <= 65535u; q++)
+            port = port * 10u + (ULONG)(*q - '0');
+        if (*q != '\0' || port == 0 || port > 65535u) return WP_ERR;
+    }
 
     t = (amiga_tcp *)mem_alloc((u32)sizeof(amiga_tcp));
     if (t == NULL) return WP_NOMEM;
@@ -368,16 +383,24 @@ static wp_status tcp_open(const char *hostport, u32 connect_timeout_ms,
     if (t->base == NULL) { mem_free(t); return WP_UNSUPPORTED; }
     SocketBase = t->base;
 
-    he = gethostbyname((STRPTR)host);
-    if (he == NULL || he->h_length != 4) { tcp_close(t); return WP_ERR; }
+    memset(&sa, 0, sizeof(sa));
+    {
+        /* numbers first: a LAN address never touches the resolver */
+        ULONG a = (ULONG)inet_addr((STRPTR)host);
+
+        if (a == (ULONG)INADDR_NONE) {
+            he = gethostbyname((STRPTR)host);
+            if (he == NULL || he->h_length != 4) { tcp_close(t); return WP_ERR; }
+            memcpy(&a, he->h_addr, 4);
+        }
+        memcpy(&sa.sin_addr, &a, 4);
+    }
     t->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (t->fd < 0) { tcp_close(t); return WP_ERR; }
     IoctlSocket(t->fd, FIONBIO, (char *)&one);
 
-    memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
     sa.sin_port = htons((unsigned short)port);
-    memcpy(&sa.sin_addr, he->h_addr, 4);
     if (connect(t->fd, (struct sockaddr *)&sa, (LONG)sizeof(sa)) < 0) {
         if (Errno() != EINPROGRESS ||
             tcp_wait(t->fd, 1, connect_timeout_ms) != 1 ||

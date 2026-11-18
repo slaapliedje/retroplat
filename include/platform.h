@@ -81,8 +81,21 @@ wp_bool   plat_clipboard_has_text(void);
 /* Timer / ticks                                                       */
 /* ------------------------------------------------------------------ */
 
+/* Milliseconds from an arbitrary origin. It wraps modulo 2^32 (about
+   49.7 days), and every backend must make that wrap CLEAN: the count
+   goes on by the real elapsed time across it, never jumps. Then the
+   difference of two samples, taken in u32, is right across the wrap --
+   and that difference is the only safe way to use this value.
+
+   So a deadline is never `now >= start + timeout`, which fails at the
+   wrap (start + timeout overflows to a small number, and the wait ends
+   at once), but PLAT_TICKS_PASSED(start, timeout_ms): one test, the same
+   in every backend. */
 u32  plat_ticks_ms(void);
 void plat_sleep_ms(u32 ms);
+
+#define PLAT_TICKS_SINCE(start)       ((u32)(plat_ticks_ms() - (u32)(start)))
+#define PLAT_TICKS_PASSED(start, ms)  (PLAT_TICKS_SINCE(start) >= (u32)(ms))
 
 
 /* ------------------------------------------------------------------ */
@@ -343,9 +356,18 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
    byte to arrive. Returns WP_OK with *out_len set (possibly less than
    out_cap) on any data, WP_TIMEOUT if none arrived in time, or WP_ERR if
    the connection is closed/broken (distinct from timeout, since a caller
-   should reconnect rather than retry on WP_ERR). */
+   should reconnect rather than retry on WP_ERR). Data before hang-up:
+   bytes the peer sent before closing are delivered first, and WP_ERR
+   comes only once none are left -- a peer that answers and closes at
+   once (an HTTP/1.0 server) must not lose its answer's tail. */
 wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
                                u32 timeout_ms, u32 *out_len);
+/* Writes all len bytes. WP_TIMEOUT means NO PROGRESS for timeout_ms --
+   the line stalled -- not that the whole write took longer: a 60 KB
+   frame at 9600 baud is a minute of honest progress, and every backend
+   restarts its clock as bytes (or a small piece of them) go out.
+   WP_ERR if the connection is closed/broken. A peer that has gone away
+   is WP_ERR, never a signal: no backend lets a write raise SIGPIPE. */
 wp_status plat_transport_write(plat_transport *t, const u8 *data, u32 len,
                                 u32 timeout_ms);
 void      plat_transport_close(plat_transport *t);

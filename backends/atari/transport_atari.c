@@ -301,13 +301,13 @@ wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
                                u32 timeout_ms, u32 *out_len)
 {
     atari_transport *at = (atari_transport *)t;
-    u32 deadline;
+    u32 t0;
     u32 n = 0;
 
     if (out_len) *out_len = 0;
     if (out_cap == 0) return WP_OK;
 
-    deadline = plat_ticks_ms() + timeout_ms;
+    t0 = plat_ticks_ms();
 
     /* Node path: Finstat is the non-blocking "how many bytes are
        waiting" poll, so Fread is only ever asked for bytes that are
@@ -323,7 +323,7 @@ wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
             avail = Finstat(at->fd);
             if (avail > 0) break;
             if (avail < 0) return WP_ERR;
-            if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
+            if (PLAT_TICKS_PASSED(t0, timeout_ms)) return WP_TIMEOUT;
         }
         if (avail > (long)out_cap) avail = (long)out_cap;
         got = Fread(at->fd, avail, out);
@@ -333,7 +333,7 @@ wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
     }
 
     while (Bconstat(DEV_AUX) == 0) {
-        if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
+        if (PLAT_TICKS_PASSED(t0, timeout_ms)) return WP_TIMEOUT;
     }
 
     while (n < out_cap && Bconstat(DEV_AUX) != 0) {
@@ -363,27 +363,27 @@ wp_status plat_transport_write(plat_transport *t, const u8 *data, u32 len,
        clock down. */
     if (at != NULL && at->fd != ATARI_NO_NODE) {
         u32 done = 0;
-        u32 deadline = plat_ticks_ms() + timeout_ms;
+        u32 t0 = plat_ticks_ms();
 
         while (done < len) {
             long w = Fwrite(at->fd, (long)(len - done), data + done);
 
             if (w < 0) return WP_ERR;
             if (w == 0) {
-                if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
+                if (PLAT_TICKS_PASSED(t0, timeout_ms)) return WP_TIMEOUT;
                 continue;
             }
             done += (u32)w;
-            deadline = plat_ticks_ms() + timeout_ms;
+            t0 = plat_ticks_ms();
         }
         return WP_OK;
     }
 
     for (i = 0; i < len; i++) {
-        u32 deadline = plat_ticks_ms() + timeout_ms;
+        u32 t0 = plat_ticks_ms();
 
         while (Bcostat(DEV_AUX) == 0) {
-            if (plat_ticks_ms() >= deadline) return WP_TIMEOUT;
+            if (PLAT_TICKS_PASSED(t0, timeout_ms)) return WP_TIMEOUT;
         }
         Bconout(DEV_AUX, data[i]);
     }

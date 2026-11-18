@@ -187,7 +187,7 @@ wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
                                u32 timeout_ms, u32 *out_len)
 {
     amiga_transport *at = (amiga_transport *)t;
-    u32 deadline;
+    u32 t0;
     u32 extra, n;
 
     if (out_len) *out_len = 0;
@@ -199,9 +199,9 @@ wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
     at->ioreq->IOSer.io_Length = 1;
     SendIO((struct IORequest *)at->ioreq);
 
-    deadline = plat_ticks_ms() + timeout_ms;
+    t0 = plat_ticks_ms();
     while (CheckIO((struct IORequest *)at->ioreq) == NULL) {
-        if (plat_ticks_ms() >= deadline) {
+        if (PLAT_TICKS_PASSED(t0, timeout_ms)) {
             AbortIO((struct IORequest *)at->ioreq);
             WaitIO((struct IORequest *)at->ioreq);
             return WP_TIMEOUT;
@@ -231,38 +231,47 @@ wp_status plat_transport_read(plat_transport *t, u8 *out, u32 out_cap,
     return WP_OK;
 }
 
-/* Ships the WHOLE buffer as one IORequest (unlike Atari's Bconout,
-   which is single-byte-at-a-time by hardware necessity -- serial.device
-   genuinely accepts a multi-byte CMD_WRITE, so there is no need to
-   chunk this into a per-byte polling loop the way transport_atari.c's
-   own comment explains ITS choice was forced by). One deadline covers
-   the whole write, racing the same SendIO/CheckIO/AbortIO/WaitIO shape
-   plat_transport_read uses above. */
+/* serial.device takes a multi-byte CMD_WRITE, so there is no per-byte
+   polling here (unlike Atari's Bconout). But one IORequest for the whole
+   buffer meant one deadline for the whole buffer, and platform.h's write
+   timeout means NO PROGRESS for timeout_ms, as on every other backend --
+   a 60 KB frame at 9600 baud is a minute of honest progress. So the
+   buffer goes in pieces of WP_AMIGA_WRITE_PIECE, each racing its own
+   timeout_ms with the SendIO/CheckIO/AbortIO/WaitIO shape the read uses:
+   a stalled line still times out, a slow one does not. 128 bytes is
+   0.13 s at 9600 baud and a few hundred IORequests a second at 115200. */
+#define WP_AMIGA_WRITE_PIECE 128u
+
 wp_status plat_transport_write(plat_transport *t, const u8 *data, u32 len,
                                 u32 timeout_ms)
 {
     amiga_transport *at = (amiga_transport *)t;
-    u32 deadline;
+    u32 done = 0;
 
     if (at == NULL) return WP_ERR;
-    if (len == 0) return WP_OK;
 
-    at->ioreq->IOSer.io_Command = CMD_WRITE;
-    at->ioreq->IOSer.io_Data = (APTR)data;
-    at->ioreq->IOSer.io_Length = len;
-    SendIO((struct IORequest *)at->ioreq);
+    while (done < len) {
+        u32 piece = len - done;
+        u32 t0;
 
-    deadline = plat_ticks_ms() + timeout_ms;
-    while (CheckIO((struct IORequest *)at->ioreq) == NULL) {
-        if (plat_ticks_ms() >= deadline) {
-            AbortIO((struct IORequest *)at->ioreq);
-            WaitIO((struct IORequest *)at->ioreq);
-            return WP_TIMEOUT;
+        if (piece > WP_AMIGA_WRITE_PIECE) piece = WP_AMIGA_WRITE_PIECE;
+        at->ioreq->IOSer.io_Command = CMD_WRITE;
+        at->ioreq->IOSer.io_Data = (APTR)(data + done);
+        at->ioreq->IOSer.io_Length = piece;
+        SendIO((struct IORequest *)at->ioreq);
+
+        t0 = plat_ticks_ms();
+        while (CheckIO((struct IORequest *)at->ioreq) == NULL) {
+            if (PLAT_TICKS_PASSED(t0, timeout_ms)) {
+                AbortIO((struct IORequest *)at->ioreq);
+                WaitIO((struct IORequest *)at->ioreq);
+                return WP_TIMEOUT;
+            }
         }
+        WaitIO((struct IORequest *)at->ioreq);
+        if (at->ioreq->IOSer.io_Error != 0) return WP_ERR;
+        done += piece;
     }
-    WaitIO((struct IORequest *)at->ioreq);
-    if (at->ioreq->IOSer.io_Error != 0) return WP_ERR;
-
     return WP_OK;
 }
 

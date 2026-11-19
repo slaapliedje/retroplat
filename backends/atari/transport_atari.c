@@ -5,6 +5,7 @@
 #include <mint/ostruct.h>
 #include <mint/mintbind.h>
 #include <mint/dcntl.h>
+#include <mint/cookie.h>   /* the RSVF cookie, for the faster SCC rates */
 #ifdef RP_ATARI_TCP
 #include <mint/cookie.h>
 #include <sys/types.h>
@@ -177,6 +178,10 @@ typedef struct {
     int     kind;      /* TRANSPORT_SERIAL */
     wp_bool opened;
     short   fd;        /* MiNT device-node handle, or -1 for the BIOS path */
+    u32     baud;      /* the line's speed now */
+    short   flow;      /* FLOW_NONE or FLOW_HARD, as the endpoint said */
+    wp_bool fast;      /* AUX is a port the RSVF cookie lists: HSMODEM's
+                          (and TOS 5's) higher Rsconf codes work on it */
 } atari_transport;
 
 #define ATARI_NO_NODE ((short)-1)
@@ -224,6 +229,35 @@ static short open_serial_node(const char *path)
     return (short)h;
 }
 
+/* Whether AUX is a port the RSVF cookie lists (HSMODEM's RSVF_COO.TXT;
+   TOS 5.01 sets one for the Falcon's SCC, tos4x A10). Its entries are
+   eight bytes -- the port's name, a flag byte, a spare, the BIOS device,
+   a spare -- ended by a null name. Rsconf codes 10-13 then mean 230400,
+   115200, 57600 and 38400 on that port, not 300 to 134. Without the
+   cookie nothing is assumed: a plain ST's MFP tops out at 19200, and
+   Bconmap is not even asked (TOS 1 has no XBIOS 44). */
+typedef struct {
+    const char   *name;
+    unsigned char flags, spare1, bios, spare2;
+} rsvf_entry;
+
+#define C_RSVF 0x52535646L   /* 'RSVF' */
+
+static wp_bool rsvf_lists_aux(void)
+{
+    long v = 0;
+    const rsvf_entry *e;
+    long dev;
+    int guard;
+
+    if (Getcookie(C_RSVF, &v) != C_FOUND || v == 0) return WP_FALSE;
+    dev = Bconmap(-1);                   /* the device AUX is mapped to now */
+    for (e = (const rsvf_entry *)v, guard = 0; e->name != NULL && guard < 32; e++, guard++) {
+        if ((long)e->bios == dev) return WP_TRUE;
+    }
+    return WP_FALSE;
+}
+
 static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
                              plat_transport **out)
 {
@@ -263,6 +297,13 @@ static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
     t->kind = TRANSPORT_SERIAL;
     t->opened = WP_TRUE;
     t->fd = ATARI_NO_NODE;
+    t->flow = flow;
+    t->baud = 0;
+    {
+        const char *d = colon + 1;
+        while (d < baud_end) t->baud = t->baud * 10u + (u32)(*d++ - '0');
+    }
+    t->fast = rsvf_lists_aux();
 
     /* 8N1, async /16 clock, receiver enabled, flow control as requested
        by the endpoint (FLOW_NONE unless asked otherwise).
@@ -596,6 +637,81 @@ static wp_status tcp_write(atari_tcp *t, const u8 *data, u32 len, u32 timeout_ms
     return WP_OK;
 }
 #endif /* RP_ATARI_TCP */
+
+/* ------------------------------------------------------------------ */
+/* Line speed (platform.h)                                               */
+/* ------------------------------------------------------------------ */
+
+/* Fastest first. The MFP's own ceiling is 19200 (Timer D); the RSVF
+   rates need the cookie, and the two fastest need RTS/CTS as well --
+   the endpoint's ":hard" -- because at 115200 the SCC's buffer fills
+   faster than a busy machine empties it, and without the handshake the
+   overflow is lost (tos4x measured 4 bytes in 900 under Hatari). The
+   MiNT device-node path offers nothing: its speed is the driver's
+   (TIOCOBAUD), not Rsconf's, and that is not done yet. */
+typedef struct { u32 baud; short code; unsigned char needs_rsvf, needs_hard; } atari_rate;
+static const atari_rate k_atari_rates[] = {
+    { 230400uL, 10, 1, 1 },
+    { 115200uL, 11, 1, 1 },
+    {  57600uL, 12, 1, 0 },
+    {  38400uL, 13, 1, 0 },
+    {  19200uL, BAUD_19200, 0, 0 },
+    {   9600uL, BAUD_9600, 0, 0 }
+};
+#define ATARI_RATE_COUNT ((u32)(sizeof(k_atari_rates) / sizeof(k_atari_rates[0])))
+
+static wp_bool rate_ok(const atari_transport *at, const atari_rate *r)
+{
+    if (r->needs_rsvf && !at->fast) return WP_FALSE;
+    if (r->needs_hard && at->flow != FLOW_HARD) return WP_FALSE;
+    return WP_TRUE;
+}
+
+u32 plat_transport_speeds(plat_transport *t, u32 *rates, u32 cap, u32 *current)
+{
+    atari_transport *at = (atari_transport *)t;
+    u32 i, n = 0;
+
+    if (current) *current = 0;
+#ifdef RP_ATARI_TCP
+    if (t != NULL && *(int *)t == TRANSPORT_TCP) return 0;
+#endif
+    if (at == NULL || at->fd != ATARI_NO_NODE || at->baud == 0) return 0;
+    if (current) *current = at->baud;
+    for (i = 0; i < ATARI_RATE_COUNT && n < cap; i++)
+        if (rate_ok(at, &k_atari_rates[i])) rates[n++] = k_atari_rates[i].baud;
+    return n;
+}
+
+wp_status plat_transport_set_speed(plat_transport *t, u32 baud)
+{
+    atari_transport *at = (atari_transport *)t;
+    const atari_rate *r = NULL;
+    _IOREC *io;
+    u32 i, t0;
+
+#ifdef RP_ATARI_TCP
+    if (t != NULL && *(int *)t == TRANSPORT_TCP) return WP_UNSUPPORTED;
+#endif
+    if (at == NULL || at->fd != ATARI_NO_NODE || at->baud == 0) return WP_UNSUPPORTED;
+    for (i = 0; i < ATARI_RATE_COUNT; i++)
+        if (k_atari_rates[i].baud == baud && rate_ok(at, &k_atari_rates[i])) r = &k_atari_rates[i];
+    if (r == NULL) return WP_RANGE;
+
+    /* What is written goes out first, at the old speed: AUX's output
+       buffer empties (Iorec's second record), then a character's time
+       more for the one in the shifter. */
+    io = (_IOREC *)Iorec(0);
+    t0 = plat_ticks_ms();
+    while (io[1].ibufhd != io[1].ibuftl && !PLAT_TICKS_PASSED(t0, 2000u)) { }
+    t0 = plat_ticks_ms();
+    while (!PLAT_TICKS_PASSED(t0, 20u)) { }
+
+    Rsconf(r->code, at->flow, (short)RS_INQUIRE, (short)RS_INQUIRE,
+           (short)RS_INQUIRE, (short)RS_INQUIRE);
+    at->baud = baud;
+    return WP_OK;
+}
 
 /* ------------------------------------------------------------------ */
 /* The four functions platform.h declares: by the endpoint's prefix,     */

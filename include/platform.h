@@ -53,6 +53,17 @@ typedef enum {
    therefore not subject to the UTF-8-internal rule in skills/encoding.md;
    callers are responsible for producing a path the native filesystem
    accepts. */
+/* The edge cases, the same on every backend (retroplat's conformance
+   test, tests/conformance.c, holds each one to them):
+   - plat_file_open of a file that is not there, for reading: not WP_OK.
+   - plat_file_read sets *out_len on every return, 0 on an error. At the
+     end of the file it is WP_OK with 0 bytes -- the end is not an
+     error. Asked for 0 bytes (cap 0) it is WP_OK with 0, whatever buf
+     is, and the position does not move.
+   - plat_file_delete of a file that is not there: WP_ERR, and nothing
+     else changes.
+   - plat_file_exists of a file that is not there: WP_OK, *exists_out
+     WP_FALSE. */
 wp_status plat_file_open(const char *native_path, plat_file_mode mode,
                           plat_file **out);
 wp_status plat_file_read(plat_file *f, u8 *buf, u32 cap, u32 *out_len);

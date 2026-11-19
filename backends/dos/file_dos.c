@@ -117,3 +117,19 @@ wp_status plat_file_exists(const char *native_path, wp_bool *exists_out)
     }
     return WP_OK;
 }
+
+wp_status plat_file_flush(plat_file *f)
+{
+    if (f == NULL) return WP_ERR;
+    return (fflush((FILE *)f) == 0 && !ferror((FILE *)f)) ? WP_OK : WP_ERR;
+}
+
+/* rename() would replace `to` on a POSIX host; the seam never does. */
+wp_status plat_file_rename(const char *from, const char *to)
+{
+    wp_bool there = WP_FALSE;
+
+    if (from == NULL || to == NULL) return WP_ERR;
+    if (plat_file_exists(to, &there) != WP_OK || there) return WP_ERR;
+    return (rename(from, to) == 0) ? WP_OK : WP_ERR;
+}

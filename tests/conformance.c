@@ -42,6 +42,7 @@ u32 rp_conformance_files(const char *dir, rp_conformance_report report)
     CHECK(st == WP_OK, "open: create for writing");
     if (st != WP_OK) return fails;
     CHECK(plat_file_write(f, data, 5) == WP_OK, "write: five bytes");
+    CHECK(plat_file_flush(f) == WP_OK, "flush: what was written");
     plat_file_close(f);
     CHECK(plat_file_exists(path, &exists) == WP_OK && exists, "exists: the file written");
 
@@ -81,6 +82,25 @@ u32 rp_conformance_files(const char *dir, rp_conformance_report report)
             plat_file_close(f);
         }
     }
+
+    /* rename: never onto a file, never from nothing */
+    CHECK(plat_file_rename(missing, path) == WP_ERR, "rename: from a missing file is WP_ERR");
+    CHECK(plat_file_rename(path, missing) == WP_OK, "rename: to a free name");
+    CHECK(plat_file_exists(path, &exists) == WP_OK && !exists, "rename: the old name is gone");
+    CHECK(plat_file_exists(missing, &exists) == WP_OK && exists, "rename: the new name is there");
+    st = plat_file_open(path, PLAT_FILE_WRITE, &f);
+    if (st == WP_OK) {
+        (void)plat_file_write(f, data, 1);
+        plat_file_close(f);
+        CHECK(plat_file_rename(path, missing) == WP_ERR, "rename: onto a file is WP_ERR");
+        if (plat_file_open(missing, PLAT_FILE_READ, &f) == WP_OK) {
+            CHECK(plat_file_size(f, &pos) == WP_OK && pos == 7, "rename: the file it refused to replace is whole");
+            plat_file_close(f);
+        }
+        CHECK(plat_file_delete(path) == WP_OK, "rename: the refused file is still there");
+    }
+    CHECK(plat_file_rename(missing, path) == WP_OK, "rename: back");
+
     CHECK(plat_file_delete(path) == WP_OK, "delete: the file");
     CHECK(plat_file_exists(path, &exists) == WP_OK && !exists, "delete: it is gone");
     CHECK(plat_file_delete(path) == WP_ERR, "delete: twice is WP_ERR");

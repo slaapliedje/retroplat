@@ -191,3 +191,20 @@ wp_status plat_file_exists(const char *native_path, wp_bool *exists_out)
 typedef int rp_file_gem4xe_not_this_target;
 
 #endif
+
+/* GEMDOS Fwrite is unbuffered here: what it accepted is the DOS's. */
+wp_status plat_file_flush(plat_file *f)
+{
+    return (f != 0) ? WP_OK : WP_ERR;
+}
+
+/* Checked first: an Atari 8-bit DOS may rename onto a name already in
+   the directory and leave two files called the same. */
+wp_status plat_file_rename(const char *from, const char *to)
+{
+    wp_bool there = WP_FALSE;
+
+    if (from == 0 || to == 0) return WP_ERR;
+    if (plat_file_exists(to, &there) != WP_OK || there) return WP_ERR;
+    return (Frename(from, to) >= 0) ? WP_OK : WP_ERR;
+}

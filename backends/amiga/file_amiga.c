@@ -132,3 +132,18 @@ wp_status plat_file_exists(const char *native_path, wp_bool *exists_out)
     }
     return WP_OK;
 }
+
+/* dos.library Write is unbuffered: what it accepted is the filesystem's. */
+wp_status plat_file_flush(plat_file *f)
+{
+    return (f != NULL) ? WP_OK : WP_ERR;
+}
+
+wp_status plat_file_rename(const char *from, const char *to)
+{
+    wp_bool there = WP_FALSE;
+
+    if (from == NULL || to == NULL) return WP_ERR;
+    if (plat_file_exists(to, &there) != WP_OK || there) return WP_ERR;
+    return Rename((CONST_STRPTR)from, (CONST_STRPTR)to) ? WP_OK : WP_ERR;
+}

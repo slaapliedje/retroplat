@@ -63,7 +63,18 @@ typedef enum {
    - plat_file_delete of a file that is not there: WP_ERR, and nothing
      else changes.
    - plat_file_exists of a file that is not there: WP_OK, *exists_out
-     WP_FALSE. */
+     WP_FALSE.
+   - plat_file_flush: everything written so far has reached the
+     filesystem, or WP_ERR. A full disk shows here at the latest --
+     plat_file_close cannot report it, and on a buffered backend the
+     last writes only leave the program at close.
+   - plat_file_rename renames a file within its directory: WP_ERR if
+     `from` is not there or `to` already is, and then nothing changes.
+     Never replaces a file, on any backend (POSIX rename would; GEMDOS,
+     AmigaDOS, HFS and MS-DOS refuse, and some Atari 8-bit DOSes would
+     make a second file of the same name) -- a safe save depends on a
+     rename never costing a file. `to` may be a full path or a bare
+     name; only its last part is used where the filesystem wants that. */
 wp_status plat_file_open(const char *native_path, plat_file_mode mode,
                           plat_file **out);
 wp_status plat_file_read(plat_file *f, u8 *buf, u32 cap, u32 *out_len);
@@ -74,6 +85,8 @@ wp_status plat_file_size(plat_file *f, u32 *size_out);
 void      plat_file_close(plat_file *f);
 wp_status plat_file_delete(const char *native_path);
 wp_status plat_file_exists(const char *native_path, wp_bool *exists_out);
+wp_status plat_file_flush(plat_file *f);
+wp_status plat_file_rename(const char *from, const char *to);
 
 
 /* ------------------------------------------------------------------ */

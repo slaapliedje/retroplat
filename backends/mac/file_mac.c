@@ -166,3 +166,30 @@ wp_status plat_file_exists(const char *native_path, wp_bool *exists_out)
     }
     return WP_OK;
 }
+
+/* FSWrite is unbuffered at this level: what it accepted is the File
+   Manager's. */
+wp_status plat_file_flush(plat_file *f)
+{
+    return (f != NULL) ? WP_OK : WP_ERR;
+}
+
+/* Rename takes the new NAME, not a path: the file stays in its folder. */
+wp_status plat_file_rename(const char *from, const char *to)
+{
+    unsigned char pfrom[256];
+    unsigned char pto[256];
+    const char *p;
+    const char *name;
+    wp_bool there = WP_FALSE;
+
+    if (from == NULL || to == NULL) return WP_ERR;
+    if (plat_file_exists(to, &there) != WP_OK || there) return WP_ERR;
+    for (p = name = to; *p != '\0'; p++) {
+        if (*p == ':') name = p + 1;
+    }
+    if (*name == '\0') return WP_ERR;
+    c_to_pstr(from, pfrom);
+    c_to_pstr(name, pto);
+    return (Rename(pfrom, 0, pto) == noErr) ? WP_OK : WP_ERR;
+}

@@ -118,7 +118,7 @@ wp_status plat_dialog_message(plat_window *parent, plat_dialog_kind kind,
    while their digits still picked them. */
 #define WP_DOS_BOX_ATTR 0x70
 /* Far: the 64 KB near data group (DGROUP) has no 2 KB to spare. */
-static u8 __far g_box_save[(9 + 4) * DOS_SCREEN_COLS * 2];
+static u8 __far g_box_save[(PLAT_FORM_MAX_FIELDS + 5) * DOS_SCREEN_COLS * 2];
 
 static void box_put(int row, int col, u8 ch)
 {
@@ -309,4 +309,197 @@ wp_status plat_dialog_choice(plat_window *parent,
             }
         }
     }
+}
+
+/* -- plat_dialog_form: a text form in a box ------------------------- */
+
+/* The form in a box like choice_in_box's: the title, then one row per
+   field -- its label, then its value in a highlighted slot, a choice
+   between < > -- and the keys along the bottom frame. The current
+   field's slot is white on blue, as DOS programs of the day lit an
+   entry field. Up/Down and Tab move between fields; in a text field
+   letters type at the end and Backspace takes the last one back; Space,
+   Left and Right step a choice; Enter is OK and Esc is Cancel. The
+   values are edited in copies, so Cancel leaves every field as it was. */
+#define FORM_LABEL_W 18
+#define FORM_SLOT_W  (PLAT_FORM_TEXT_MAX + 2)
+#define FORM_INNER   (FORM_LABEL_W + FORM_SLOT_W)
+#define FORM_ATTR_ON 0x1F
+
+/* Far, like g_box_save: DGROUP has no room for the copies. */
+static char __far g_form_text[PLAT_FORM_MAX_FIELDS][PLAT_FORM_TEXT_MAX + 1];
+static u32  g_form_index[PLAT_FORM_MAX_FIELDS];
+
+static u32 far_len(const char __far *s)
+{
+    u32 n = 0;
+    while (s[n] != '\0') n++;
+    return n;
+}
+
+/* A key with its scan code, for the arrows (AL 0 or 0xE0). */
+static void form_read_key(u8 *ascii, u8 *scan)
+{
+    union REGS regs;
+
+    regs.h.ah = 0x00;
+    int86(0x16, &regs, &regs);
+    *ascii = regs.h.al;
+    *scan = regs.h.ah;
+}
+
+static void form_put(int row, int col, u8 ch, u8 attr)
+{
+    dos_dialog_video_ptr vmem = dialog_video_mem();
+    int offset = (row * DOS_SCREEN_COLS + col) * 2;
+
+    vmem[offset] = ch;
+    vmem[offset + 1] = attr;
+}
+
+static void form_cursor(int row, int col, wp_bool show)
+{
+    union REGS regs;
+
+    regs.h.ah = 0x02;
+    regs.h.bh = 0;
+    regs.h.dh = (unsigned char)row;
+    regs.h.dl = (unsigned char)col;
+    int86(0x10, &regs, &regs);
+    regs.h.ah = 0x01;
+    regs.w.cx = show ? 0x0607 : 0x2000;
+    int86(0x10, &regs, &regs);
+}
+
+static void form_draw_field(const plat_form_field *f, u32 i, int row, int left, wp_bool on)
+{
+    u8 attr = on ? FORM_ATTR_ON : WP_DOS_BOX_ATTR;
+    int c = left + 2 + FORM_LABEL_W, k;
+    const char *label = f->label != NULL ? f->label : "";
+
+    box_text(row, left + 2, (const u8 *)label, (u32)strlen(label) < FORM_LABEL_W - 1 ? (u32)strlen(label) : FORM_LABEL_W - 1, FORM_LABEL_W);
+    if (f->kind == PLAT_FORM_CHOICE) {
+        const char *o = (f->options != NULL && g_form_index[i] < f->option_count) ? f->options[g_form_index[i]] : "";
+        u32 n = (u32)strlen(o);
+        form_put(row, c, '<', attr);
+        for (k = 0; k < FORM_SLOT_W - 2; k++) form_put(row, c + 1 + k, (u8)((u32)k < n ? o[k] : ' '), attr);
+        form_put(row, c + FORM_SLOT_W - 1, '>', attr);
+    } else {
+        u32 n = far_len(g_form_text[i]);
+        form_put(row, c, ' ', attr);
+        for (k = 0; k < FORM_SLOT_W - 2; k++) {
+            u8 ch = (u8)((u32)k < n ? g_form_text[i][k] : ' ');
+            form_put(row, c + 1 + k, (ch >= 0x20 && ch < 0x7F) ? ch : (u8)'?', attr);
+        }
+        form_put(row, c + FORM_SLOT_W - 1, ' ', attr);
+    }
+}
+
+wp_status plat_dialog_form(plat_window *parent,
+                            const u8 *title_utf8, u32 title_len,
+                            plat_form_field *fields, u32 count,
+                            wp_bool *out_cancelled)
+{
+    static const char keys[] = " Enter=OK  Esc=Cancel  Space=change ";
+    int rows = (int)count + 4, top, left, r, c;
+    u32 i, cur = 0, cap;
+    u8 ascii, scan;
+    union REGS regs;
+    unsigned short cursor_shape;
+    wp_bool cancelled = WP_FALSE;
+
+    WP_UNUSED(parent);
+    if (count == 0 || count > PLAT_FORM_MAX_FIELDS || fields == NULL) return WP_RANGE;
+    for (i = 0; i < count; i++) {
+        g_form_index[i] = fields[i].index;
+        g_form_text[i][0] = '\0';
+        if (fields[i].kind == PLAT_FORM_TEXT && fields[i].text != NULL) {
+            u32 n = (u32)strlen(fields[i].text), k;
+            if (n > PLAT_FORM_TEXT_MAX) n = PLAT_FORM_TEXT_MAX;
+            for (k = 0; k < n; k++) g_form_text[i][k] = fields[i].text[k];
+            g_form_text[i][n] = '\0';
+        }
+    }
+
+    top = (DOS_SCREEN_ROWS - rows) / 2;
+    left = (DOS_SCREEN_COLS - (FORM_INNER + 4)) / 2;
+    box_rows(top, rows, WP_TRUE);
+    regs.h.ah = 0x03;
+    regs.h.bh = 0;
+    int86(0x10, &regs, &regs);
+    cursor_shape = regs.w.cx;
+
+    box_put(top, left, 0xC9);
+    for (c = 1; c < FORM_INNER + 3; c++) box_put(top, left + c, 0xCD);
+    box_put(top, left + FORM_INNER + 3, 0xBB);
+    for (r = 1; r < rows - 1; r++) {
+        box_put(top + r, left, 0xBA);
+        box_put(top + r, left + 1, ' ');
+        box_put(top + r, left + FORM_INNER + 2, ' ');
+        box_put(top + r, left + FORM_INNER + 3, 0xBA);
+    }
+    box_text(top + 1, left + 2, title_utf8, title_len, FORM_INNER);
+    box_text(top + 2, left + 2, (const u8 *)"", 0, FORM_INNER);
+    box_put(top + rows - 1, left, 0xC8);
+    for (c = 1; c < FORM_INNER + 3; c++) box_put(top + rows - 1, left + c, 0xCD);
+    box_put(top + rows - 1, left + FORM_INNER + 3, 0xBC);
+    box_text(top + rows - 1, left + 2, (const u8 *)keys, (u32)(sizeof(keys) - 1), (int)(sizeof(keys) - 1));
+
+    for (;;) {
+        for (i = 0; i < count; i++) form_draw_field(&fields[i], i, top + 3 + (int)i, left, (wp_bool)(i == cur));
+        if (fields[cur].kind == PLAT_FORM_TEXT) {
+            u32 n = far_len(g_form_text[cur]);
+            if (n > FORM_SLOT_W - 3) n = FORM_SLOT_W - 3;
+            form_cursor(top + 3 + (int)cur, left + 2 + FORM_LABEL_W + 1 + (int)n, WP_TRUE);
+        } else {
+            form_cursor(top + 3 + (int)cur, left + 2 + FORM_LABEL_W, WP_FALSE);
+        }
+        form_read_key(&ascii, &scan);
+        if (ascii == 27) { cancelled = WP_TRUE; break; }
+        if (ascii == 13) break;
+        if (ascii == 9 || (ascii == 0 && scan == 0x50)) { cur = (cur + 1) % count; continue; }       /* Tab, Down */
+        if ((ascii == 0 && scan == 0x0F) || ((ascii == 0 || ascii == 0xE0) && scan == 0x48)) {      /* Shift+Tab, Up */
+            cur = (cur + count - 1) % count;
+            continue;
+        }
+        if (ascii == 0xE0 && scan == 0x50) { cur = (cur + 1) % count; continue; }
+        if (fields[cur].kind == PLAT_FORM_CHOICE) {
+            u32 n = fields[cur].option_count;
+            if (n == 0) continue;
+            if (ascii == ' ' || ((ascii == 0 || ascii == 0xE0) && scan == 0x4D)) g_form_index[cur] = (g_form_index[cur] + 1) % n;
+            else if ((ascii == 0 || ascii == 0xE0) && scan == 0x4B) g_form_index[cur] = (g_form_index[cur] + n - 1) % n;
+            continue;
+        }
+        cap = fields[cur].text_cap > 0 ? fields[cur].text_cap - 1 : 0;
+        if (cap > PLAT_FORM_TEXT_MAX) cap = PLAT_FORM_TEXT_MAX;
+        if (ascii == 8) {
+            u32 n = far_len(g_form_text[cur]);
+            if (n > 0) g_form_text[cur][n - 1] = '\0';
+        } else if (ascii >= 0x20 && ascii < 0x7F) {
+            u32 n = far_len(g_form_text[cur]);
+            if (n < cap) {
+                g_form_text[cur][n] = (char)ascii;
+                g_form_text[cur][n + 1] = '\0';
+            }
+        }
+    }
+
+    box_rows(top, rows, WP_FALSE);
+    regs.h.ah = 0x01;
+    regs.w.cx = cursor_shape;
+    int86(0x10, &regs, &regs);
+    if (!cancelled) {
+        for (i = 0; i < count; i++) {
+            if (fields[i].kind == PLAT_FORM_CHOICE) {
+                if (g_form_index[i] < fields[i].option_count) fields[i].index = g_form_index[i];
+            } else if (fields[i].text != NULL && fields[i].text_cap > 0) {
+                u32 n = far_len(g_form_text[i]), k;
+                if (n > fields[i].text_cap - 1) n = fields[i].text_cap - 1;
+                for (k = 0; k < n; k++) fields[i].text[k] = g_form_text[i][k];
+                fields[i].text[n] = '\0';
+            }
+        }
+    }
+    *out_cancelled = cancelled;
+    return WP_OK;
 }

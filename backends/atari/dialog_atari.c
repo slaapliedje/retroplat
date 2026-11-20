@@ -42,9 +42,42 @@
    were plain statics, which the large data model puts in far memory, so
    a choice of two or more there would have drawn whatever sat at the
    same offset in bank $00. */
-static WP_AES_NEAR OBJECT g_dialog_tree[WP_DIALOG_OBJ_COUNT];
-static WP_AES_NEAR char   g_dialog_title_buf[40];
-static WP_AES_NEAR char   g_dialog_option_bufs[WP_DIALOG_MAX_OPTIONS][32];
+/* The choice dialog's tree and strings, and the form's (plat_dialog_form,
+   below), share one block: both are modal, so they are never up at once,
+   and on gem4xe bank $00 is the scarce thing -- the form's own 1.7 KB
+   beside the choice's left no room for the application's stack. */
+#define WP_FORM_LABEL_W   18        /* characters */
+#define WP_FORM_CHOICE_W  20
+#define WP_FORM_OBJ_COUNT (2 + 2 * PLAT_FORM_MAX_FIELDS + 2)
+
+static WP_AES_NEAR union {
+    struct {
+        OBJECT tree[WP_DIALOG_OBJ_COUNT];
+        char   title[40];
+        char   options[WP_DIALOG_MAX_OPTIONS][32];
+    } choice;
+    struct {
+        OBJECT  tree[WP_FORM_OBJ_COUNT];
+        TEDINFO ted[PLAT_FORM_MAX_FIELDS];
+        char    text[PLAT_FORM_MAX_FIELDS][PLAT_FORM_TEXT_MAX + 1];
+        char    label[PLAT_FORM_MAX_FIELDS][WP_FORM_LABEL_W];
+        char    choice[PLAT_FORM_MAX_FIELDS][WP_FORM_CHOICE_W];
+        char    title[40];
+        char    tmplt[PLAT_FORM_TEXT_MAX + 1];
+        char    valid[PLAT_FORM_TEXT_MAX + 1];
+    } form;
+} g_dlg;
+#define g_dialog_tree        g_dlg.choice.tree
+#define g_dialog_title_buf   g_dlg.choice.title
+#define g_dialog_option_bufs g_dlg.choice.options
+#define g_form_tree          g_dlg.form.tree
+#define g_form_ted           g_dlg.form.ted
+#define g_form_text          g_dlg.form.text
+#define g_form_label         g_dlg.form.label
+#define g_form_choice        g_dlg.form.choice
+#define g_form_title         g_dlg.form.title
+#define g_form_tmplt         g_dlg.form.tmplt
+#define g_form_valid         g_dlg.form.valid
 static WP_AES_NEAR char   g_dialog_ok_buf[] = "  OK  ";
 static WP_AES_NEAR char   g_dialog_cancel_buf[] = "Cancel";
 
@@ -537,5 +570,257 @@ wp_bool wp_atari_dialog_selfcheck(void)
         if ((g_dialog_tree[cancel2].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
     }
 
+    return WP_TRUE;
+}
+
+/* -- plat_dialog_form: a GEM dialog with edit fields ---------------- */
+
+/* One row per field: its label as a G_STRING, then its value -- a
+   G_FTEXT edit field (the AES's own editing: typing, Backspace, Esc to
+   clear, the cursor keys and Tab between fields) or, for a choice, a
+   TOUCHEXIT button showing the current option that steps to the next
+   when clicked, the cycle button GEM programs used where TOS 1.x has no
+   popup menu. OK (the default) and Cancel under them. Built at run time
+   like the choice dialog's tree, for the same reason (no resource
+   compiler), and checked the same way (wp_atari_form_selfcheck). */
+/* A TEDINFO's three pointers: char * in gemlib, a LONG holding the
+   bank-$00 address in gem4xe's kit. */
+#ifdef GEM4XE_APP_GEM_H
+#  define TED_PTR(p) ((LONG)(p))
+#else
+#  define TED_PTR(p) (p)
+#endif
+
+static u32 g_form_index[PLAT_FORM_MAX_FIELDS];
+
+static void form_obj(short index, short next, unsigned short type, unsigned short flags,
+                     short x, short y, short w, short h)
+{
+    g_form_tree[index].ob_next = next;
+    g_form_tree[index].ob_head = -1;
+    g_form_tree[index].ob_tail = -1;
+    g_form_tree[index].ob_type = type;
+    g_form_tree[index].ob_flags = flags;
+    g_form_tree[index].ob_state = OS_NORMAL;
+    g_form_tree[index].ob_x = x;
+    g_form_tree[index].ob_y = y;
+    g_form_tree[index].ob_width = w;
+    g_form_tree[index].ob_height = h;
+}
+
+static void form_choice_text(u32 i, const plat_form_field *f)
+{
+    const char *o = (f->options != NULL && g_form_index[i] < f->option_count) ? f->options[g_form_index[i]] : "";
+    copy_bounded(g_form_choice[i], WP_FORM_CHOICE_W, (const u8 *)o, (u32)strlen(o));
+}
+
+/* The value object of field i, and back: 2 + 2i + 1. */
+#define FORM_VALUE_OBJ(i) ((short)(3 + 2 * (short)(i)))
+
+static wp_status build_form_tree(const u8 *title_utf8, u32 title_len,
+                                 const plat_form_field *fields, u32 count,
+                                 short *out_first_edit, short *out_ok, short *out_cancel,
+                                 short *out_cx, short *out_cy, short *out_cw, short *out_ch)
+{
+    short char_w, char_h, box_w, box_h, content_w, y, row_h, ok, cancel, first_edit = 0;
+    u32 i;
+
+    if (count == 0 || count > PLAT_FORM_MAX_FIELDS || fields == NULL) return WP_RANGE;
+    memset(g_form_tree, 0, sizeof(g_form_tree));   /* no stale OF_LASTOB (see build_dialog_tree) */
+    graf_handle(&char_w, &char_h, &box_w, &box_h);
+    WP_UNUSED(box_w);
+    WP_UNUSED(box_h);
+
+    for (i = 0; i < PLAT_FORM_TEXT_MAX; i++) {
+        g_form_tmplt[i] = '_';
+        g_form_valid[i] = 'X';                     /* any character */
+    }
+    g_form_tmplt[PLAT_FORM_TEXT_MAX] = '\0';
+    g_form_valid[PLAT_FORM_TEXT_MAX] = '\0';
+    copy_bounded(g_form_title, (u32)sizeof(g_form_title), title_utf8, title_len);
+
+    ok = (short)(2 + 2 * (short)count);
+    cancel = (short)(ok + 1);
+    content_w = (short)((2 + WP_FORM_LABEL_W + PLAT_FORM_TEXT_MAX + 2) * char_w);
+    row_h = (short)(char_h + 6);                   /* room for a button's border */
+
+    form_obj(0, -1, G_BOX, OF_NONE, 0, 0, content_w, 0);
+    g_form_tree[0].ob_head = 1;
+    g_form_tree[0].ob_tail = cancel;
+    g_form_tree[0].ob_state = OS_OUTLINED;
+    OB_SPEC_SET_INDEX(g_form_tree[0], WP_DIALOG_BOX_SPEC);
+
+    y = (short)(char_h / 2);
+    form_obj(1, 2, G_STRING, OF_NONE, char_w, y, (short)(content_w - 2 * char_w), char_h);
+    OB_SPEC_SET_STRING(g_form_tree[1], g_form_title);
+    y = (short)(y + 2 * char_h);
+
+    for (i = 0; i < count; i++) {
+        short label = (short)(2 + 2 * (short)i), value = (short)(label + 1);
+        short next = (short)(value + 1);
+        const plat_form_field *f = &fields[i];
+        const char *l = f->label != NULL ? f->label : "";
+
+        copy_bounded(g_form_label[i], WP_FORM_LABEL_W, (const u8 *)l, (u32)strlen(l));
+        form_obj(label, value, G_STRING, OF_NONE, (short)(2 * char_w), (short)(y + 3),
+                 (short)((WP_FORM_LABEL_W - 1) * char_w), char_h);
+        OB_SPEC_SET_STRING(g_form_tree[label], g_form_label[i]);
+        g_form_index[i] = f->index;
+        if (f->kind == PLAT_FORM_CHOICE) {
+            form_choice_text(i, f);
+            form_obj(value, next, G_BUTTON, (unsigned short)(OF_SELECTABLE | OF_TOUCHEXIT),
+                     (short)((2 + WP_FORM_LABEL_W) * char_w), (short)(y + 2),
+                     (short)(WP_FORM_CHOICE_W * char_w), char_h);
+            OB_SPEC_SET_STRING(g_form_tree[value], g_form_choice[i]);
+        } else {
+            TEDINFO *t = &g_form_ted[i];
+            u32 n = (f->text != NULL) ? (u32)strlen(f->text) : 0u;
+
+            if (n > PLAT_FORM_TEXT_MAX) n = PLAT_FORM_TEXT_MAX;
+            copy_bounded(g_form_text[i], PLAT_FORM_TEXT_MAX + 1, (const u8 *)(f->text != NULL ? f->text : ""), n);
+            memset(t, 0, sizeof(*t));
+            t->te_ptext = TED_PTR(g_form_text[i]);
+            t->te_ptmplt = TED_PTR(g_form_tmplt);
+            t->te_pvalid = TED_PTR(g_form_valid);
+            t->te_font = 3;                        /* IBM: the system font */
+            t->te_just = 0;                        /* TE_LEFT */
+            t->te_color = 0x1180;                  /* black on white, opaque */
+            t->te_thickness = 0;
+            t->te_txtlen = PLAT_FORM_TEXT_MAX + 1;
+            t->te_tmplen = PLAT_FORM_TEXT_MAX + 1;
+            form_obj(value, next, G_FTEXT, OF_EDITABLE,
+                     (short)((2 + WP_FORM_LABEL_W) * char_w), (short)(y + 3),
+                     (short)(PLAT_FORM_TEXT_MAX * char_w), char_h);
+            g_form_tree[value].ob_spec.tedinfo = t;
+            if (first_edit == 0) first_edit = value;
+        }
+        y = (short)(y + row_h);
+    }
+    y = (short)(y + char_h / 2);
+    form_obj(ok, cancel, G_BUTTON, (unsigned short)(OF_SELECTABLE | OF_EXIT | OF_DEFAULT),
+             (short)(2 * char_w), y, (short)(8 * char_w), char_h);
+    OB_SPEC_SET_STRING(g_form_tree[ok], g_dialog_ok_buf);
+    form_obj(cancel, 0, G_BUTTON, (unsigned short)(OF_SELECTABLE | OF_EXIT | OF_LASTOB),
+             (short)(content_w - 10 * char_w), y, (short)(8 * char_w), char_h);
+    OB_SPEC_SET_STRING(g_form_tree[cancel], g_dialog_cancel_buf);
+    g_form_tree[0].ob_height = (short)(y + char_h + char_h / 2);
+
+    form_center(g_form_tree, out_cx, out_cy, out_cw, out_ch);
+    *out_first_edit = first_edit;
+    *out_ok = ok;
+    *out_cancel = cancel;
+    return WP_OK;
+}
+
+wp_status plat_dialog_form(plat_window *parent,
+                            const u8 *title_utf8, u32 title_len,
+                            plat_form_field *fields, u32 count,
+                            wp_bool *out_cancelled)
+{
+    short first_edit, ok, cancel, cx, cy, cw, ch, hit;
+    u32 i;
+    wp_status st;
+
+    WP_UNUSED(parent);
+    st = build_form_tree(title_utf8, title_len, fields, count, &first_edit, &ok, &cancel,
+                         &cx, &cy, &cw, &ch);
+    if (st != WP_OK) return st;
+
+    form_dial(FMD_START, cx, cy, 0, 0, cx, cy, cw, ch);
+    objc_draw(g_form_tree, 0, MAX_DEPTH, cx, cy, cw, ch);
+    for (;;) {
+        /* first_edit is an OF_EDITABLE G_FTEXT, or 0 when there is none:
+           form_do's second argument must be one or the other (#177). */
+        hit = (short)(form_do(g_form_tree, first_edit) & 0x7FFF);
+        if (hit >= 0 && hit < WP_FORM_OBJ_COUNT) g_form_tree[hit].ob_state &= (unsigned short)~OS_SELECTED;
+        if (hit == ok || hit == cancel || hit < 3 || hit > FORM_VALUE_OBJ(count - 1)) break;
+        /* A choice's button: the next option, drawn in place. */
+        i = (u32)((hit - 3) / 2);
+        if (fields[i].kind == PLAT_FORM_CHOICE && fields[i].option_count > 0) {
+            g_form_index[i] = (g_form_index[i] + 1u) % fields[i].option_count;
+            form_choice_text(i, &fields[i]);
+        }
+        objc_draw(g_form_tree, hit, MAX_DEPTH, cx, cy, cw, ch);
+    }
+    form_dial(FMD_FINISH, cx, cy, 0, 0, cx, cy, cw, ch);
+
+    *out_cancelled = (wp_bool)(hit != ok);
+    if (hit == ok) {
+        for (i = 0; i < count; i++) {
+            if (fields[i].kind == PLAT_FORM_CHOICE) {
+                fields[i].index = g_form_index[i];
+            } else if (fields[i].text != NULL && fields[i].text_cap > 0) {
+                u32 n = (u32)strlen(g_form_text[i]);
+                if (n > fields[i].text_cap - 1) n = fields[i].text_cap - 1;
+                memcpy(fields[i].text, g_form_text[i], n);
+                fields[i].text[n] = '\0';
+            }
+        }
+    }
+    return WP_OK;
+}
+
+/* build_form_tree's invariants, without form_do (the boundary every
+   selfcheck here keeps): one OF_LASTOB, on the last object; the chain
+   from the root's head ends at its tail; exactly the text fields are
+   editable, each a G_FTEXT whose TEDINFO holds its own buffer, and the
+   first of them is form_do's start; every choice is a TOUCHEXIT button;
+   OK and Cancel apart and inside the box; and a smaller form after a
+   bigger one inherits nothing. */
+wp_bool wp_atari_form_selfcheck(void)
+{
+    static const char *const opts[] = { "Off", "5 minutes" };
+    plat_form_field f[4];
+    static char a[PLAT_FORM_TEXT_MAX + 1], b[PLAT_FORM_TEXT_MAX + 1], c[PLAT_FORM_TEXT_MAX + 1];
+    short first_edit, ok, cancel, cx, cy, cw, ch, cur, steps, lastob;
+    u32 i, n;
+
+    strcpy(a, "C:\\LETTERS");
+    b[0] = '\0';
+    strcpy(c, "serial:aux:9600");
+    memset(f, 0, sizeof(f));
+    f[0].kind = PLAT_FORM_CHOICE; f[0].label = "Autosave"; f[0].options = opts; f[0].option_count = 2; f[0].index = 1;
+    f[1].kind = PLAT_FORM_TEXT; f[1].label = "Documents folder"; f[1].text = a; f[1].text_cap = sizeof(a);
+    f[2].kind = PLAT_FORM_TEXT; f[2].label = "Dictionary folder"; f[2].text = b; f[2].text_cap = sizeof(b);
+    f[3].kind = PLAT_FORM_TEXT; f[3].label = "Offload link"; f[3].text = c; f[3].text_cap = sizeof(c);
+
+    for (n = 4; n >= 2; n -= 2) {               /* four fields, then two */
+        if (build_form_tree((const u8 *)"Settings", 8, f, n, &first_edit, &ok, &cancel,
+                            &cx, &cy, &cw, &ch) != WP_OK) return WP_FALSE;
+        if (ok != (short)(2 + 2 * n) || cancel != ok + 1) return WP_FALSE;
+        lastob = 0;
+        for (i = 0; i < (u32)WP_FORM_OBJ_COUNT; i++) {
+            if (g_form_tree[i].ob_flags & OF_LASTOB) lastob++;
+        }
+        if (lastob != 1 || (g_form_tree[cancel].ob_flags & OF_LASTOB) == 0) return WP_FALSE;
+        if (g_form_tree[0].ob_head != 1 || g_form_tree[0].ob_tail != cancel) return WP_FALSE;
+        cur = 1;
+        for (steps = 0; steps < WP_FORM_OBJ_COUNT && cur != cancel; steps++) cur = g_form_tree[cur].ob_next;
+        if (cur != cancel || g_form_tree[cancel].ob_next != 0) return WP_FALSE;
+        if (first_edit != FORM_VALUE_OBJ(1)) return WP_FALSE;      /* field 0 is the choice */
+        if ((g_form_tree[first_edit].ob_flags & OF_EDITABLE) == 0) return WP_FALSE;
+        for (i = 0; i < n; i++) {
+            OBJECT *o = &g_form_tree[FORM_VALUE_OBJ(i)];
+            wp_bool editable = (wp_bool)((o->ob_flags & OF_EDITABLE) != 0);
+            if (f[i].kind == PLAT_FORM_TEXT) {
+                if (!editable || o->ob_type != G_FTEXT) return WP_FALSE;
+                if (o->ob_spec.tedinfo != &g_form_ted[i]) return WP_FALSE;
+                if (g_form_ted[i].te_ptext != TED_PTR(g_form_text[i])) return WP_FALSE;
+                if (strcmp(g_form_text[i], f[i].text) != 0) return WP_FALSE;
+            } else {
+                if (editable || o->ob_type != G_BUTTON) return WP_FALSE;
+                if ((o->ob_flags & OF_TOUCHEXIT) == 0) return WP_FALSE;
+                if (strcmp(g_form_choice[i], "5 minutes") != 0) return WP_FALSE;
+            }
+            if (o->ob_x + o->ob_width > g_form_tree[0].ob_width) return WP_FALSE;
+        }
+        for (i = 0; i < (u32)WP_FORM_OBJ_COUNT; i++) {          /* nothing else editable */
+            if ((g_form_tree[i].ob_flags & OF_EDITABLE) && (i < 3 || i > (u32)FORM_VALUE_OBJ(n - 1) || (i & 1u) == 0))
+                return WP_FALSE;
+        }
+        if (g_form_tree[ok].ob_x + g_form_tree[ok].ob_width > g_form_tree[cancel].ob_x) return WP_FALSE;
+        if (g_form_tree[cancel].ob_x + g_form_tree[cancel].ob_width > g_form_tree[0].ob_width) return WP_FALSE;
+        if (OB_SPEC_INDEX(g_form_tree[0]) != WP_DIALOG_BOX_SPEC) return WP_FALSE;
+    }
     return WP_TRUE;
 }

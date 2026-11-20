@@ -19,4 +19,18 @@ void window_host_next_choice(i32 index);
    wp_action_tell), is the message itself. */
 const char *window_host_last_title(void);
 
+/* Host-only, for plat_dialog_form: what the coming forms do. Edits
+   queue for the next form shown -- text for a PLAT_FORM_TEXT field
+   (index ignored), index for a PLAT_FORM_CHOICE (text ignored) -- and
+   it answers OK with them; window_host_form_cancel makes it answer
+   Cancel and change nothing instead. window_host_form_next moves on:
+   what is queued after it is for the form after that, so a test can
+   follow a dialog that opens again. A form nothing was queued for
+   answers OK, unchanged. window_host_form_count: how many forms have
+   been shown; the last one's title is window_host_last_title's. */
+void window_host_form_edit(u32 field, const char *text, i32 index);
+void window_host_form_cancel(void);
+void window_host_form_next(void);
+u32  window_host_form_count(void);
+
 #endif /* WP_WINDOW_HOST_H */

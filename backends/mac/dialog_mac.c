@@ -228,3 +228,154 @@ wp_status plat_dialog_choice(plat_window *parent,
     if (out_index) *out_index = (u32)hit - 1u;
     return WP_OK;
 }
+
+/* -- plat_dialog_form: a modal dialog with editText items ----------- */
+
+/* OK and Cancel are items 1 and 2; then each field is two items, its
+   label (static text) and its value -- an editText item (the Dialog
+   Manager's own editing, Tab between them), or for a choice a push
+   button titled with the current option that steps to the next when
+   clicked. Return and Enter are OK (outlined as the default), Esc and
+   Cmd-period Cancel, through the choice dialog's filter. */
+#define WP_FORM_LABEL_PX 124
+#define WP_FORM_ROW_H    24
+
+static Str255 g_form_p;
+
+static ConstStringPtr form_pstr(const char *s)
+{
+    u32 n = (u32)strlen(s);
+    if (n > 255) n = 255;
+    g_form_p[0] = (unsigned char)n;
+    memcpy(g_form_p + 1, s, n);
+    return g_form_p;
+}
+
+wp_status plat_dialog_form(plat_window *parent,
+                            const u8 *title_utf8, u32 title_len,
+                            plat_form_field *fields, u32 count,
+                            wp_bool *out_cancelled)
+{
+    static const u8 k_ok[] = "OK";
+    static const u8 k_cancel[] = "Cancel";
+    static u32 index[PLAT_FORM_MAX_FIELDS];
+    Rect screen = qd.screenBits.bounds;
+    Rect box;
+    Handle items;
+    DialogPtr dlg;
+    GrafPtr saved;
+    short w, h, y, vx, vw;
+    long size, at;
+    INTEGER hit = 0, type;
+    Handle ih;
+    Rect r;
+    u32 i;
+
+    WP_UNUSED(parent);
+    if (count == 0 || count > PLAT_FORM_MAX_FIELDS || fields == NULL) return WP_RANGE;
+    if (title_len > 255) title_len = 255;
+    w = 470;
+    if (w > screen.right - screen.left - 20) w = (short)(screen.right - screen.left - 20);
+    vx = (short)(WP_DIALOG_MARGIN + WP_FORM_LABEL_PX);
+    vw = (short)(w - vx - WP_DIALOG_MARGIN);
+    h = (short)(WP_DIALOG_MARGIN + WP_DIALOG_LINE_H + WP_DIALOG_BTN_GAP +
+                (short)count * WP_FORM_ROW_H + WP_DIALOG_BTN_GAP + WP_DIALOG_BTN_H + WP_DIALOG_MARGIN);
+
+    size = 2 + (long)(3 + 2 * count) * 270;
+    items = NewHandle(size);
+    if (items == NULL) return WP_NOMEM;
+    HLock(items);
+    {
+        unsigned char *p = (unsigned char *)*items;
+        short count_minus_1 = (short)(2 + 2 * count);     /* OK, Cancel, title, 2 a field, less one */
+        short by = (short)(h - WP_DIALOG_MARGIN - WP_DIALOG_BTN_H);
+
+        memcpy(p, &count_minus_1, 2);
+        at = 2;
+        at = ditl_item(p, at, by, (short)(w - WP_DIALOG_MARGIN - 70), (short)(by + WP_DIALOG_BTN_H),
+                       (short)(w - WP_DIALOG_MARGIN), (unsigned char)(ctrlItem + btnCtrl), k_ok, 2);
+        at = ditl_item(p, at, by, (short)(w - WP_DIALOG_MARGIN - 160), (short)(by + WP_DIALOG_BTN_H),
+                       (short)(w - WP_DIALOG_MARGIN - 90), (unsigned char)(ctrlItem + btnCtrl), k_cancel, 6);
+        y = (short)(WP_DIALOG_MARGIN + WP_DIALOG_LINE_H + WP_DIALOG_BTN_GAP);
+        for (i = 0; i < count; i++) {
+            const char *l = fields[i].label != NULL ? fields[i].label : "";
+            at = ditl_item(p, at, (short)(y + 3), WP_DIALOG_MARGIN, (short)(y + 3 + WP_DIALOG_LINE_H),
+                           (short)(vx - 4), (unsigned char)(statText + itemDisable), (const u8 *)l, (u32)strlen(l));
+            index[i] = fields[i].index;
+            if (fields[i].kind == PLAT_FORM_CHOICE) {
+                const char *o = (fields[i].options != NULL && index[i] < fields[i].option_count)
+                                ? fields[i].options[index[i]] : "";
+                at = ditl_item(p, at, y, vx, (short)(y + WP_DIALOG_BTN_H), (short)(vx + 150),
+                               (unsigned char)(ctrlItem + btnCtrl), (const u8 *)o, (u32)strlen(o));
+            } else {
+                const char *t = fields[i].text != NULL ? fields[i].text : "";
+                u32 n = (u32)strlen(t);
+                if (n > PLAT_FORM_TEXT_MAX) n = PLAT_FORM_TEXT_MAX;
+                /* An editText's frame is drawn 3 pixels outside its rect. */
+                at = ditl_item(p, at, (short)(y + 3), (short)(vx + 3), (short)(y + 3 + WP_DIALOG_LINE_H),
+                               (short)(vx + vw - 3), (unsigned char)editText, (const u8 *)t, n);
+            }
+            y = (short)(y + WP_FORM_ROW_H);
+        }
+        at = ditl_item(p, at, WP_DIALOG_MARGIN, WP_DIALOG_MARGIN, (short)(WP_DIALOG_MARGIN + WP_DIALOG_LINE_H),
+                       (short)(w - WP_DIALOG_MARGIN), (unsigned char)(statText + itemDisable), title_utf8, title_len);
+    }
+    HUnlock(items);
+    SetHandleSize(items, at);
+
+    box.left = (short)((screen.left + screen.right - w) / 2);
+    box.right = (short)(box.left + w);
+    box.top = (short)(screen.top + (screen.bottom - screen.top - h) / 3);
+    if (box.top < screen.top + 40) box.top = (short)(screen.top + 40);
+    box.bottom = (short)(box.top + h);
+
+    GetPort(&saved);
+    dlg = NewDialog(NULL, &box, (ConstStringPtr) "\p", true, dBoxProc, (WindowPtr)-1L,
+                    false, 0, items);
+    if (dlg == NULL) {
+        DisposeHandle(items);
+        return WP_NOMEM;
+    }
+    SetPort(dlg);
+    for (i = 0; i < count; i++) {                       /* the first text field takes the typing */
+        if (fields[i].kind == PLAT_FORM_TEXT) {
+            SelectDialogItemText(dlg, (INTEGER)(4 + 2 * i), 0, 32767);
+            break;
+        }
+    }
+    g_choice_default = 1;
+    g_choice_cancel = 2;
+    for (;;) {
+        ModalDialog(NewModalFilterUPP(choice_filter), &hit);
+        if (hit == 1 || hit == 2) break;
+        if (hit >= 4 && ((hit - 4) & 1) == 0) {
+            i = (u32)(hit - 4) / 2u;
+            if (i < count && fields[i].kind == PLAT_FORM_CHOICE && fields[i].option_count > 0) {
+                index[i] = (index[i] + 1u) % fields[i].option_count;
+                GetDialogItem(dlg, hit, &type, &ih, &r);
+                SetControlTitle((ControlHandle)ih, form_pstr(fields[i].options[index[i]]));
+            }
+        }
+    }
+    if (hit == 1) {
+        for (i = 0; i < count; i++) {
+            if (fields[i].kind == PLAT_FORM_CHOICE) {
+                fields[i].index = index[i];
+            } else if (fields[i].text != NULL && fields[i].text_cap > 0) {
+                Str255 got;
+                u32 n;
+                GetDialogItem(dlg, (INTEGER)(4 + 2 * i), &type, &ih, &r);
+                GetDialogItemText(ih, got);
+                n = got[0];
+                if (n > PLAT_FORM_TEXT_MAX) n = PLAT_FORM_TEXT_MAX;
+                if (n > fields[i].text_cap - 1) n = fields[i].text_cap - 1;
+                memcpy(fields[i].text, got + 1, n);
+                fields[i].text[n] = '\0';
+            }
+        }
+    }
+    DisposeDialog(dlg);
+    SetPort(saved);
+    *out_cancelled = (wp_bool)(hit != 1);
+    return WP_OK;
+}

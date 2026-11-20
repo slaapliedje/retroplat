@@ -329,10 +329,8 @@ wp_status plat_dialog_message(plat_window *parent, plat_dialog_kind kind,
    give each option's label; default_index is pre-selected. *out_index
    is only meaningful when *out_cancelled is WP_FALSE. Required of every
    backend (WP_UNSUPPORTED is the documented legal escape hatch, not a
-   reason to skip a target when it's actually being built). No free-text
-   entry variant exists -- nothing in this project's current feature set
-   needs one yet (font size and alignment are both small, fixed,
-   pre-enumerated lists).
+   reason to skip a target when it's actually being built). Free text is
+   plat_dialog_form's, below.
 
    Cancel, one rule for every backend: a choice of two or more always
    has exactly one way out. If the caller lists an option labelled
@@ -347,6 +345,47 @@ wp_status plat_dialog_choice(plat_window *parent,
                               const u32 *option_label_lens,
                               u32 option_count, u32 default_index,
                               wp_bool *out_cancelled, u32 *out_index);
+
+/* A form (M21 T21.4, RetroWP's Settings): labelled fields filled in
+   together, then OK or Cancel. The portable side says WHAT -- a title
+   and the fields -- and the backend draws it its own way: a GEM dialog
+   (G_FTEXT edit fields), a MUI window (String and Cycle gadgets), a
+   Mac dialog (editText items), a DOS text form.
+
+   PLAT_FORM_TEXT edits `text` in place: NUL-terminated, at most
+   text_cap - 1 bytes, and never more than PLAT_FORM_TEXT_MAX characters
+   -- the widest edit field every backend can show whole (a TOS 1.x
+   G_FTEXT does not scroll). A caller with a longer value must not offer
+   it here. ASCII, as plat_dialog_choice's labels.
+   PLAT_FORM_CHOICE picks one of `options` (option_count of them, short
+   labels) into `index`: a cycle button or gadget that steps through
+   them, or the backend's own popup.
+
+   OK: WP_OK, *out_cancelled WP_FALSE, the fields as edited. Cancel
+   (the button or the platform's cancel key): *out_cancelled WP_TRUE and
+   every field exactly as it was given. Return is OK on every backend
+   except inside a multi-line edit, which no field here is.
+   At most PLAT_FORM_MAX_FIELDS fields; WP_RANGE past that or for none.
+   WP_UNSUPPORTED is the legal escape hatch, as for plat_dialog_choice. */
+#define PLAT_FORM_TEXT        0
+#define PLAT_FORM_CHOICE      1
+#define PLAT_FORM_TEXT_MAX    40
+#define PLAT_FORM_MAX_FIELDS  10
+
+typedef struct {
+    u8                  kind;          /* PLAT_FORM_TEXT or PLAT_FORM_CHOICE */
+    const char         *label;         /* "Documents folder" */
+    char               *text;          /* TEXT: in/out */
+    u32                 text_cap;
+    const char * const *options;       /* CHOICE: the labels */
+    u32                 option_count;
+    u32                 index;         /* CHOICE: in/out */
+} plat_form_field;
+
+wp_status plat_dialog_form(plat_window *parent,
+                            const u8 *title_utf8, u32 title_len,
+                            plat_form_field *fields, u32 count,
+                            wp_bool *out_cancelled);
 
 
 /* ------------------------------------------------------------------ */

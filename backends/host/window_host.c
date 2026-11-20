@@ -115,3 +115,87 @@ const char *window_host_last_title(void)
 {
     return g_last_title;
 }
+
+/* window_host.h: what the coming forms do -- edits queued by
+   window_host_form_edit, each tagged with the form it is for (0 = the
+   next one shown), and which of them are cancelled. */
+#define HOST_FORM_EDITS 32
+#define HOST_FORM_AHEAD 8
+static struct { u32 form; u32 field; char text[PLAT_FORM_TEXT_MAX + 1]; i32 index; } g_form_edits[HOST_FORM_EDITS];
+static u32 g_form_edit_count = 0;
+static u32 g_form_batch = 0;                    /* the form window_host_form_edit adds to */
+static wp_bool g_form_cancel[HOST_FORM_AHEAD];
+static u32 g_form_count = 0;
+
+wp_status plat_dialog_form(plat_window *parent,
+                            const u8 *title_utf8, u32 title_len,
+                            plat_form_field *fields, u32 count,
+                            wp_bool *out_cancelled)
+{
+    u32 i, kept;
+
+    WP_UNUSED(parent);
+    for (i = 0; i < title_len && i + 1 < (u32)sizeof(g_last_title); i++) {
+        g_last_title[i] = (char)title_utf8[i];
+    }
+    g_last_title[i] = '\0';
+    if (count == 0 || count > PLAT_FORM_MAX_FIELDS || fields == NULL) return WP_RANGE;
+    g_form_count++;
+    *out_cancelled = g_form_cancel[0];
+    kept = 0;
+    for (i = 0; i < g_form_edit_count; i++) {
+        if (g_form_edits[i].form == 0) {
+            plat_form_field *f;
+            if (g_form_cancel[0] || g_form_edits[i].field >= count) continue;
+            f = &fields[g_form_edits[i].field];
+            if (f->kind == PLAT_FORM_TEXT && f->text != NULL && f->text_cap > 0) {
+                u32 n = (u32)strlen(g_form_edits[i].text);
+                if (n > f->text_cap - 1) n = f->text_cap - 1;
+                memcpy(f->text, g_form_edits[i].text, n);
+                f->text[n] = '\0';
+            } else if (f->kind == PLAT_FORM_CHOICE && g_form_edits[i].index >= 0 &&
+                       (u32)g_form_edits[i].index < f->option_count) {
+                f->index = (u32)g_form_edits[i].index;
+            }
+        } else {
+            g_form_edits[kept] = g_form_edits[i];
+            g_form_edits[kept].form--;
+            kept++;
+        }
+    }
+    g_form_edit_count = kept;
+    for (i = 0; i + 1 < HOST_FORM_AHEAD; i++) g_form_cancel[i] = g_form_cancel[i + 1];
+    g_form_cancel[HOST_FORM_AHEAD - 1] = WP_FALSE;
+    if (g_form_batch > 0) g_form_batch--;
+    return WP_OK;
+}
+
+void window_host_form_edit(u32 field, const char *text, i32 index)
+{
+    u32 n = 0;
+
+    if (g_form_edit_count >= HOST_FORM_EDITS) return;
+    g_form_edits[g_form_edit_count].form = g_form_batch;
+    g_form_edits[g_form_edit_count].field = field;
+    g_form_edits[g_form_edit_count].index = index;
+    if (text != NULL) {
+        for (; text[n] != '\0' && n < PLAT_FORM_TEXT_MAX; n++) g_form_edits[g_form_edit_count].text[n] = text[n];
+    }
+    g_form_edits[g_form_edit_count].text[n] = '\0';
+    g_form_edit_count++;
+}
+
+void window_host_form_cancel(void)
+{
+    if (g_form_batch < HOST_FORM_AHEAD) g_form_cancel[g_form_batch] = WP_TRUE;
+}
+
+void window_host_form_next(void)
+{
+    if (g_form_batch + 1 < HOST_FORM_AHEAD) g_form_batch++;
+}
+
+u32 window_host_form_count(void)
+{
+    return g_form_count;
+}

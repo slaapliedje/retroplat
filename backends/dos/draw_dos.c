@@ -112,13 +112,22 @@ static const u8 dos_palette[16][3] = {
     {0xFF, 0x55, 0x55}, {0xFF, 0x55, 0xFF}, {0xFF, 0xFF, 0x55}, {0xFF, 0xFF, 0xFF}
 };
 
-static u8 rgb_to_dos_color(u8 r, u8 g, u8 b)
+/* `count` is 16 for a foreground, 8 for a background: with the
+   adapter's blink attribute on, as the BIOS leaves it, bit 7 of a cell's
+   attribute is BLINK, not a bright background -- so a fill nearest
+   white (15) made attribute 0xF0, grey with its text blinking. RetroWP's
+   Help is filled white, and its page blinked on every machine; a
+   screenshot in the off phase looked like a page with nothing on it but
+   its selected link (whose own fill is grey, 7). Turning blink off
+   (INT 10h AX=1003h) is EGA/VGA only, so the background stays in the
+   eight every adapter shows. */
+static u8 rgb_to_dos_color(u8 r, u8 g, u8 b, u8 count)
 {
     u32 best_dist = 0xFFFFFFFFul;
     u8 best = 0;
     u8 i;
 
-    for (i = 0; i < 16; i++) {
+    for (i = 0; i < count; i++) {
         i32 dr = (i32)r - (i32)dos_palette[i][0];
         i32 dg = (i32)g - (i32)dos_palette[i][1];
         i32 db = (i32)b - (i32)dos_palette[i][2];
@@ -183,7 +192,7 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
     st = plat_utf8_to_native(utf8, len, native, (u32)sizeof(native), &out_len, &unmapped);
     if (st != WP_OK) return st;
 
-    fg = rgb_to_dos_color(r, g, b);
+    fg = rgb_to_dos_color(r, g, b, 16);
     if (df->bold) fg |= 0x08;  /* intensity bit -- the standard DOS-text-mode "bold" convention */
 
     /* Preserves whatever background is already at each cell (a plain
@@ -238,7 +247,7 @@ wp_status plat_draw_polyline(plat_gc *gc, const i32 *xy, u16 n, i32 width,
 wp_status plat_fill_rect(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                           u8 r, u8 g, u8 b)
 {
-    u8 bg = rgb_to_dos_color(r, g, b);
+    u8 bg = rgb_to_dos_color(r, g, b, 8);
     u8 attr = (u8)(bg << 4);  /* black foreground on the requested background */
     i32 row, col;
 

@@ -186,8 +186,8 @@ typedef struct {
     short   fd;        /* MiNT device-node handle, or -1 for the BIOS path */
     u32     baud;      /* the line's speed now */
     short   flow;      /* FLOW_NONE or FLOW_HARD, as the endpoint said */
-    wp_bool fast;      /* AUX is a port the RSVF cookie lists: HSMODEM's
-                          (and TOS 5's) higher Rsconf codes work on it */
+    unsigned char fast; /* which of Rsconf's higher codes work on AUX's
+                           port: bit n for code 10+n (fast_codes below) */
 } atari_transport;
 
 #define ATARI_NO_NODE ((short)-1)
@@ -235,33 +235,89 @@ static short open_serial_node(const char *path)
     return (short)h;
 }
 
-/* Whether AUX is a port the RSVF cookie lists (HSMODEM's RSVF_COO.TXT;
-   TOS 5.01 sets one for the Falcon's SCC, tos4x A10). Its entries are
-   eight bytes -- the port's name, a flag byte, a spare, the BIOS device,
-   a spare -- ended by a null name. Rsconf codes 10-13 then mean 230400,
-   115200, 57600 and 38400 on that port, not 300 to 134. Without the
-   cookie nothing is assumed: a plain ST's MFP tops out at 19200, and
-   Bconmap is not even asked (TOS 1 has no XBIOS 44). */
+/* Which of Rsconf's higher codes -- 10, 11, 12, 13 for 230400, 115200,
+   57600, 38400 -- work on the port AUX is mapped to.
+
+   The RSVF cookie (HSMODEM's RSVF_COO.TXT; TOS 5 sets one too) lists
+   ports and their BIOS devices: eight-byte entries -- a pointer, a flag
+   byte, a spare, the BIOS device, a spare. Flag bit 7 marks a port (the
+   pointer is its name); without it the pointer is NULL, the end, or the
+   next list (RSVF_COO.TXT; bit 6 GEMDOS, bit 5 BIOS).
+   It promises no speeds. HSMODEM's fast codes depend on the port and the
+   machine (its SCC_X.TXT and MFP_X.TXT): on an MFP port (MODEM1,
+   SERIAL1) codes 10-13 keep their old meaning, 200 to 110 baud, unless
+   RSVE hardware is fitted, which nothing here can see. So a listed port
+   is not enough: an earlier version offered 57600 on a TT's MODEM1 and
+   set the port to 134 baud (seen on the MiSTer TT core under TOS 5,
+   2026-11-22; the HELLO check caught it and fell back).
+
+   By name and machine (_MCH):
+     SERIAL2 (a TT's SCC A)            10-13
+     MODEM2 (SCC B) on a Falcon or
+       Mega STE                        10-13
+     MODEM2 on a TT (8 MHz PCLK)       13 only (38400; 76800 and 153600
+                                       are codes 15 and 14, not offered)
+     anything else                     none: stop at 19200
+   The GEMDOS route HSMODEM also offers (Fcntl TIOCOBAUD in bit/s, on a
+   port whose entry has the GEMDOS bit) would cover RSVE-fitted MFP
+   ports; it needs a GEMDOS handle on the port and is not done.
+
+   Without the cookie nothing is assumed, and Bconmap is not even asked
+   (TOS 1 has no XBIOS 44). */
 typedef struct {
     const char   *name;
     unsigned char flags, spare1, bios, spare2;
 } rsvf_entry;
 
 #define C_RSVF 0x52535646L   /* 'RSVF' */
+#define RSVF_PORT 0x80u      /* flag byte bit 7: the entry is a port, not a link */
 
-static wp_bool rsvf_lists_aux(void)
+#define C__MCH 0x5F4D4348L   /* '_MCH' */
+#define FAST_ALL  0x0Fu      /* codes 10-13 */
+#define FAST_38K4 0x08u      /* code 13 alone */
+
+/* The rule above, given the port's name and _MCH's value (-1 when
+   there is no cookie). */
+static unsigned char fast_codes(const char *name, long mch)
 {
-    long v = 0;
+    long family = mch < 0 ? 0 : (mch >> 16);
+    wp_bool falcon = (wp_bool)(family == 3);
+    wp_bool mega_ste = (wp_bool)(mch == 0x00010010L);
+    wp_bool tt = (wp_bool)(family == 2);
+
+    if (name == NULL) return 0;
+    if (strcmp(name, "SERIAL2") == 0) return FAST_ALL;
+    if (strcmp(name, "MODEM2") == 0) {
+        if (falcon || mega_ste) return FAST_ALL;
+        if (tt) return FAST_38K4;
+    }
+    return 0;
+}
+
+static unsigned char aux_fast_codes(void)
+{
+    long v = 0, mch = -1;
     const rsvf_entry *e;
     long dev;
     int guard;
 
-    if (Getcookie(C_RSVF, &v) != C_FOUND || v == 0) return WP_FALSE;
+    if (Getcookie(C_RSVF, &v) != C_FOUND || v == 0) return 0;
+    if (Getcookie(C__MCH, &mch) != C_FOUND) mch = -1;
     dev = Bconmap(-1);                   /* the device AUX is mapped to now */
-    for (e = (const rsvf_entry *)v, guard = 0; e->name != NULL && guard < 32; e++, guard++) {
-        if ((long)e->bios == dev) return WP_TRUE;
+    /* Flag bit 7 set: a port, its name at `name`. Clear: NULL ends the
+       list, anything else is the next list's address (HSMODEM's DRVIN
+       chains lists when drivers add ports). The guard bounds a broken
+       or circular cookie. */
+    for (e = (const rsvf_entry *)v, guard = 0; guard < 64; guard++) {
+        if ((e->flags & RSVF_PORT) == 0) {
+            if (e->name == NULL) break;
+            e = (const rsvf_entry *)e->name;
+            continue;
+        }
+        if ((long)e->bios == dev) return fast_codes(e->name, mch);
+        e++;
     }
-    return WP_FALSE;
+    return 0;
 }
 
 static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
@@ -309,7 +365,7 @@ static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
         const char *d = colon + 1;
         while (d < baud_end) t->baud = t->baud * 10u + (u32)(*d++ - '0');
     }
-    t->fast = rsvf_lists_aux();
+    t->fast = aux_fast_codes();
 
     /* 8N1, async /16 clock, receiver enabled, flow control as requested
        by the endpoint (FLOW_NONE unless asked otherwise).
@@ -940,7 +996,8 @@ static wp_status sting_write(atari_sting *t, const u8 *data, u32 len, u32 timeou
 /* ------------------------------------------------------------------ */
 
 /* Fastest first. The MFP's own ceiling is 19200 (Timer D); the RSVF
-   rates need the cookie, and the two fastest need RTS/CTS as well --
+   rates need the port to take them (aux_fast_codes), and the two
+   fastest need RTS/CTS as well --
    the endpoint's ":hard" -- because at 115200 the SCC's buffer fills
    faster than a busy machine empties it, and without the handshake the
    overflow is lost (tos4x measured 4 bytes in 900 under Hatari). The
@@ -959,7 +1016,7 @@ static const atari_rate k_atari_rates[] = {
 
 static wp_bool rate_ok(const atari_transport *at, const atari_rate *r)
 {
-    if (r->needs_rsvf && !at->fast) return WP_FALSE;
+    if (r->needs_rsvf && (at->fast & (1u << (r->code - 10))) == 0) return WP_FALSE;
     if (r->needs_hard && at->flow != FLOW_HARD) return WP_FALSE;
     return WP_TRUE;
 }

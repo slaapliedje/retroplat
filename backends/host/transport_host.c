@@ -355,3 +355,79 @@ void plat_transport_close(plat_transport *t)
     if (ht->owns_fifo) unlink(ht->fifo_path);
     mem_free(ht);
 }
+
+/* Serial ports on the host: whatever the environment names, since a
+   test harness has no fixed machine to describe. RP_HOST_SERIAL_PORTS is
+   a comma-separated list of device paths, each optionally followed by
+   '=' and flag letters: b busy, c current, h -- 115200 needs RTS/CTS
+   (to stand in for an Atari's SCC port). Unset: no ports. The label is
+   the path's last part. */
+static const char *host_port_entry(u32 index, u32 *len)
+{
+    const char *s = getenv("RP_HOST_SERIAL_PORTS");
+    u32 i = 0;
+
+    if (s == NULL) return NULL;
+    while (*s != '\0') {
+        const char *e = strchr(s, ',');
+        u32 n = e != NULL ? (u32)(e - s) : (u32)strlen(s);
+        if (n > 0) {
+            if (i == index) { *len = n; return s; }
+            i++;
+        }
+        if (e == NULL) break;
+        s = e + 1;
+    }
+    return NULL;
+}
+
+static wp_bool host_port_parse(const char *s, u32 n, plat_serial_port *p, wp_bool *hard)
+{
+    u32 k = 0, f;
+    const char *base;
+
+    while (k < n && s[k] != '=') k++;
+    if (k == 0 || k >= PLAT_PORT_NAME_MAX) return WP_FALSE;
+    memcpy(p->name, s, k);
+    p->name[k] = '\0';
+    base = strrchr(p->name, '/');
+    base = base != NULL ? base + 1 : p->name;
+    strncpy(p->label, base, PLAT_PORT_LABEL_MAX - 1);
+    p->label[PLAT_PORT_LABEL_MAX - 1] = '\0';
+    p->flags = 0;
+    *hard = WP_FALSE;
+    for (f = k + 1; f < n; f++) {
+        if (s[f] == 'b') p->flags |= PLAT_PORT_BUSY;
+        if (s[f] == 'c') p->flags |= PLAT_PORT_CURRENT;
+        if (s[f] == 'h') *hard = WP_TRUE;
+    }
+    return WP_TRUE;
+}
+
+u32 plat_serial_ports(plat_serial_port *out, u32 cap)
+{
+    u32 i, n = 0, len;
+    const char *s;
+    wp_bool hard;
+
+    for (i = 0; n < cap && (s = host_port_entry(i, &len)) != NULL; i++)
+        if (host_port_parse(s, len, &out[n], &hard)) n++;
+    return n;
+}
+
+u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_from)
+{
+    u32 i, n = 0, len;
+    const char *s;
+    plat_serial_port p;
+    wp_bool hard;
+
+    if (hard_from) *hard_from = 0;
+    for (i = 0; (s = host_port_entry(i, &len)) != NULL; i++) {
+        if (!host_port_parse(s, len, &p, &hard) || strcmp(p.name, name) != 0) continue;
+        for (n = 0; n < HOST_RATE_COUNT && n < cap; n++) rates[n] = k_host_rates[n];
+        if (hard && hard_from) *hard_from = 115200uL;
+        return n;
+    }
+    return 0;
+}

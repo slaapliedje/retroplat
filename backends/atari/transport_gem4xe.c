@@ -79,6 +79,23 @@ void plat_transport_close(plat_transport *t)
     WP_UNUSED(t);
 }
 
+/* No serial port to choose. */
+u32 plat_serial_ports(plat_serial_port *out, u32 cap)
+{
+    WP_UNUSED(out);
+    WP_UNUSED(cap);
+    return 0;
+}
+
+u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_from)
+{
+    WP_UNUSED(name);
+    WP_UNUSED(rates);
+    WP_UNUSED(cap);
+    if (hard_from) *hard_from = 0;
+    return 0;
+}
+
 #else
 
 typedef int rp_transport_gem4xe_not_this_target;

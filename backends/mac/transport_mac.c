@@ -6,8 +6,8 @@
 #include "platform.h"
 
 /* Phase 4: real RS-232 transport over the classic Mac Serial Driver
-   (.AIn/.AOut, the modem port -- port B's .BIn/.BOut, the printer
-   port on most real hardware, isn't used here), mirroring
+   (.AIn/.AOut, the modem port; since T21.7 also .BIn/.BOut, the printer
+   port, for an endpoint whose <device> is "printer"), mirroring
    transport_atari.c's/transport_amiga.c's role and
    "serial:<device>:<baud>" endpoint convention exactly (<device> is
    parsed but unvalidated beyond non-empty -- there is exactly one
@@ -73,6 +73,34 @@ static wp_bool baud_to_config(unsigned long baud, short *out_config)
     }
 }
 
+/* Port B -- the printer port -- when <device> says "printer" (any
+   case); anything else is the modem port, port A, as it always was. */
+static wp_bool name_is(const char *dev, unsigned long len, const char *k)
+{
+    unsigned long i;
+
+    if (len != (unsigned long)strlen(k)) return WP_FALSE;
+    for (i = 0; i < len; i++) {
+        char c = dev[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != k[i]) return WP_FALSE;
+    }
+    return WP_TRUE;
+}
+
+static wp_bool is_printer(const char *dev, unsigned long len)
+{
+    return name_is(dev, len, "printer");
+}
+
+/* Whether AppleTalk holds the printer port: SPConfig (0x1FB) keeps each
+   port's use, port B's in the low four bits, and 1 is useATalk (Inside
+   Macintosh II, "The AppleTalk Manager"). */
+static wp_bool printer_port_busy(void)
+{
+    return (wp_bool)((*(unsigned char *)0x01FB & 0x0F) == 1);
+}
+
 static wp_bool parse_endpoint(const char *endpoint, unsigned long *out_baud)
 {
     const char *rest;
@@ -114,6 +142,7 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
     unsigned long baud;
     short config;
     SerShk handshake;
+    wp_bool printer;
 
     WP_UNUSED(connect_timeout_ms); /* SerReset takes effect immediately --
                                        no connection handshake at this
@@ -124,6 +153,8 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
 
     if (!parse_endpoint(endpoint, &baud)) return WP_UNSUPPORTED;
     if (!baud_to_config(baud, &config)) return WP_ERR;
+    printer = is_printer(endpoint + 7, (unsigned long)(strrchr(endpoint + 7, ':') - (endpoint + 7)));
+    if (printer && printer_port_busy()) return WP_ERR;
 
     t = (mac_transport *)mem_alloc((u32)sizeof(mac_transport));
     if (t == NULL) return WP_NOMEM;
@@ -133,13 +164,13 @@ wp_status plat_transport_open(const char *endpoint, u32 connect_timeout_ms,
     t->out_open = WP_FALSE;
     t->baud = (u32)baud;
 
-    if (OpenDriver((ConstStringPtr) "\p.AIn", &t->in_ref) != noErr) {
+    if (OpenDriver(printer ? (ConstStringPtr) "\p.BIn" : (ConstStringPtr) "\p.AIn", &t->in_ref) != noErr) {
         close_transport(t);
         return WP_ERR;
     }
     t->in_open = WP_TRUE;
 
-    if (OpenDriver((ConstStringPtr) "\p.AOut", &t->out_ref) != noErr) {
+    if (OpenDriver(printer ? (ConstStringPtr) "\p.BOut" : (ConstStringPtr) "\p.AOut", &t->out_ref) != noErr) {
         close_transport(t);
         return WP_ERR;
     }
@@ -320,4 +351,36 @@ wp_status plat_transport_set_speed(plat_transport *t, u32 baud)
 void plat_transport_close(plat_transport *t)
 {
     close_transport((mac_transport *)t);
+}
+
+/* The two ports every Mac of this era has; the printer port is busy
+   while AppleTalk holds it. */
+u32 plat_serial_ports(plat_serial_port *out, u32 cap)
+{
+    u32 n = 0;
+
+    if (n < cap) {
+        strcpy(out[n].name, "modem");
+        strcpy(out[n].label, "Modem port");
+        out[n].flags = 0;
+        n++;
+    }
+    if (n < cap) {
+        strcpy(out[n].name, "printer");
+        strcpy(out[n].label, "Printer port");
+        out[n].flags = (u8)(printer_port_busy() ? PLAT_PORT_BUSY : 0);
+        n++;
+    }
+    return n;
+}
+
+u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_from)
+{
+    u32 i, n = 0;
+
+    if (hard_from) *hard_from = 0;
+    if (!is_printer(name, (unsigned long)strlen(name)) &&
+        !name_is(name, (unsigned long)strlen(name), "modem")) return 0;
+    for (i = 0; i < MAC_RATE_COUNT && n < cap; i++) rates[n++] = k_mac_rates[i];
+    return n;
 }

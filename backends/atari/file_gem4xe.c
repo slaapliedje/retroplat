@@ -186,12 +186,6 @@ wp_status plat_file_exists(const char *native_path, wp_bool *exists_out)
     return WP_OK;
 }
 
-#else  /* not gem4xe -- file_atari.c serves this seam instead */
-
-typedef int rp_file_gem4xe_not_this_target;
-
-#endif
-
 /* GEMDOS Fwrite is unbuffered here: what it accepted is the DOS's. */
 wp_status plat_file_flush(plat_file *f)
 {
@@ -208,3 +202,9 @@ wp_status plat_file_rename(const char *from, const char *to)
     if (plat_file_exists(to, &there) != WP_OK || there) return WP_ERR;
     return (Frename(from, to) >= 0) ? WP_OK : WP_ERR;
 }
+
+#else  /* not gem4xe -- file_atari.c serves this seam instead */
+
+typedef int rp_file_gem4xe_not_this_target;
+
+#endif

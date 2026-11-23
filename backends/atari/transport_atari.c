@@ -46,10 +46,9 @@
 
 /* endpoint format: "serial:<device>:<baud>[:<flow>]" (platform.h's own
    doc comment already establishes the first three fields). <device> is
-   currently unused/unvalidated beyond "non-empty" -- the ST has exactly
-   one serial port (AUX), so there is nothing to select, but the field is
-   kept in the endpoint string for forward compatibility with the
-   pipe:/tcp: endpoints' shape.
+   "aux" (whatever AUX is mapped to), a port's name (MODEM1, MODEM2,
+   SERIAL1, SERIAL2, LAN -- see "Choosing a port" below), or a MiNT
+   device path; any other word is taken as "aux", as it always was.
 
    BAUD CEILING. 19200 is not a limit this file invented: it is the top
    of Rsconf()'s speed table (BAUD_19200 == 0 in mint/ostruct.h, and the
@@ -188,6 +187,8 @@ typedef struct {
     short   flow;      /* FLOW_NONE or FLOW_HARD, as the endpoint said */
     unsigned char fast; /* which of Rsconf's higher codes work on AUX's
                            port: bit n for code 10+n (fast_codes below) */
+    short   old_map;   /* the BIOS device AUX was mapped to before a named
+                          port was opened, put back on close; 0 = none */
 } atari_transport;
 
 #define ATARI_NO_NODE ((short)-1)
@@ -320,6 +321,186 @@ static unsigned char aux_fast_codes(void)
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Choosing a port (M21 T21.7)                                          */
+/* ------------------------------------------------------------------ */
+
+/* The ports beyond AUX are BIOS devices 6 and up, and Bconmap(dev) makes
+   one of them AUX -- after which Rsconf, Bconin and the rest all mean
+   it (Compendium, "Serial Port Mapping"). Which device is which port
+   depends on the machine:
+
+     device   Mega STE             TT030                Falcon030
+       6      Modem 1 (ST MFP)     Modem 1 (ST MFP)     --
+       7      Modem 2 (SCC B)      Modem 2 (SCC B)      Modem (SCC B)
+       8      Serial/LAN (SCC A)   Serial 1 (TT MFP)    LAN (SCC A)
+       9      --                   Serial 2/LAN (SCC A) --
+
+   The RSVF cookie, where there is one, names them itself (HSMODEM's
+   MODEM1, MODEM2, SERIAL1, SERIAL2, LAN) and is believed first; without
+   it the table above supplies the names, in HSMODEM's spelling so that
+   fast_codes reads both alike. Bconmap exists only from TOS 1.02 on,
+   and Bconmap(0) answers 0 where it does (44, its own opcode, where it
+   does not); a machine without it has only AUX, offered as "aux". The
+   test leans on the cookie jar first: a machine without _MCH is a TOS
+   1.0x ST, whose one port is AUX either way, and XBIOS 44 is never
+   asked of it. Falcon TOS 4.00-4.04 cannot reach a mapped device other
+   than its default without Atari's FPATCH2.PRG (Compendium, Bconmap's
+   caveats) -- its default, the modem port, needs no mapping. */
+#define RSVF_BIOS 0x20u      /* flag byte bit 5: reachable through the BIOS */
+#define MAX_MAPPED 8
+
+typedef struct { const char *name; short bios; } atari_port;
+
+static wp_bool have_bconmap(long *mch)
+{
+    if (Getcookie(C__MCH, mch) != C_FOUND) { *mch = -1; return WP_FALSE; }
+    return (wp_bool)(Bconmap(0) == 0);
+}
+
+/* The ports, by RSVF or else by machine; their count. */
+static u32 atari_ports(atari_port *out, u32 cap, long mch)
+{
+    static const char *const k_tt[] = { "MODEM1", "MODEM2", "SERIAL1", "SERIAL2" };
+    static const char *const k_mste[] = { "MODEM1", "MODEM2", "SERIAL2" };
+    long v = 0, family = mch >> 16;
+    const rsvf_entry *e;
+    u32 n = 0, i;
+    int guard;
+
+    if (Getcookie(C_RSVF, &v) == C_FOUND && v != 0) {
+        for (e = (const rsvf_entry *)v, guard = 0; guard < 64 && n < cap; guard++) {
+            if ((e->flags & RSVF_PORT) == 0) {
+                if (e->name == NULL) break;
+                e = (const rsvf_entry *)e->name;
+                continue;
+            }
+            if ((e->flags & RSVF_BIOS) != 0 && e->bios >= 6 && e->name != NULL) {
+                out[n].name = e->name;
+                out[n].bios = (short)e->bios;
+                n++;
+            }
+            e++;
+        }
+        if (n > 0) return n;
+    }
+    if (family == 2) {
+        for (i = 0; i < 4 && n < cap; i++) { out[n].name = k_tt[i]; out[n].bios = (short)(6 + i); n++; }
+    } else if (family == 3) {
+        if (n < cap) { out[n].name = "MODEM2"; out[n].bios = 7; n++; }
+        if (n < cap) { out[n].name = "LAN"; out[n].bios = 8; n++; }
+    } else if (mch == 0x00010010L) {
+        for (i = 0; i < 3 && n < cap; i++) { out[n].name = k_mste[i]; out[n].bios = (short)(6 + i); n++; }
+    } else if (n < cap) {
+        out[n].name = "MODEM1"; out[n].bios = 6; n++;
+    }
+    return n;
+}
+
+static char up_char(char c) { return (char)(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c); }
+
+/* Case-blind, `b` bounded by its length. */
+static wp_bool same_name(const char *a, const char *b, u32 blen)
+{
+    u32 i;
+    for (i = 0; i < blen; i++) {
+        if (a[i] == '\0' || up_char(a[i]) != up_char(b[i])) return WP_FALSE;
+    }
+    return (wp_bool)(a[blen] == '\0');
+}
+
+static void port_label(const char *name, long mch, char *out)
+{
+    static const struct { const char *name, *label; } k[] = {
+        { "MODEM1", "Modem 1" }, { "MODEM2", "Modem 2" },
+        { "SERIAL1", "Serial 1" }, { "SERIAL2", "Serial 2" }, { "LAN", "LAN" }
+    };
+    const char *l = name;
+    u32 i;
+
+    for (i = 0; i < (u32)(sizeof(k) / sizeof(k[0])); i++)
+        if (strcmp(name, k[i].name) == 0) l = k[i].label;
+    if ((mch >> 16) == 3 && strcmp(name, "MODEM2") == 0) l = "Modem";   /* the Falcon has one */
+    if (mch == 0x00010010L && strcmp(name, "SERIAL2") == 0) l = "Serial/LAN";
+    strncpy(out, l, PLAT_PORT_LABEL_MAX - 1);
+    out[PLAT_PORT_LABEL_MAX - 1] = '\0';
+}
+
+u32 plat_serial_ports(plat_serial_port *out, u32 cap)
+{
+    atari_port ports[MAX_MAPPED];
+    long mch, now;
+    u32 i, n;
+
+    if (cap == 0) return 0;
+    if (!have_bconmap(&mch)) {
+        strcpy(out[0].name, "aux");
+        strcpy(out[0].label, "Modem");
+        out[0].flags = PLAT_PORT_CURRENT;
+        return 1;
+    }
+    n = atari_ports(ports, MAX_MAPPED, mch);
+    now = Bconmap(-1);
+    for (i = 0; i < n && i < cap; i++) {
+        strncpy(out[i].name, ports[i].name, PLAT_PORT_NAME_MAX - 1);
+        out[i].name[PLAT_PORT_NAME_MAX - 1] = '\0';
+        port_label(ports[i].name, mch, out[i].label);
+        out[i].flags = (u8)((long)ports[i].bios == now ? PLAT_PORT_CURRENT : 0);
+    }
+    return i;
+}
+
+/* The BIOS device of a named port; 0 if this machine has none by that
+   name (or no Bconmap). */
+static short port_device(const char *name, u32 len)
+{
+    atari_port ports[MAX_MAPPED];
+    long mch;
+    u32 i, n;
+
+    if (!have_bconmap(&mch)) return 0;
+    n = atari_ports(ports, MAX_MAPPED, mch);
+    for (i = 0; i < n; i++)
+        if (same_name(ports[i].name, name, len)) return ports[i].bios;
+    return 0;
+}
+
+static wp_bool is_port_word(const char *name, u32 len)
+{
+    static const char *const k[] = { "MODEM1", "MODEM2", "SERIAL1", "SERIAL2", "LAN" };
+    u32 i;
+    for (i = 0; i < (u32)(sizeof(k) / sizeof(k[0])); i++)
+        if (same_name(k[i], name, len)) return WP_TRUE;
+    return WP_FALSE;
+}
+
+static void serial_rates_for(unsigned char fast, wp_bool hard, u32 *rates, u32 cap, u32 *n,
+                             u32 *hard_from);
+
+u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_from)
+{
+    long mch, v = 0;
+    unsigned char fast = 0;
+    u32 n = 0, len = (u32)strlen(name);
+
+    if (hard_from) *hard_from = 0;
+    if (same_name("aux", name, len)) {
+        fast = aux_fast_codes();
+    } else {
+        if (port_device(name, len) == 0) return 0;
+        (void)have_bconmap(&mch);
+        if (Getcookie(C_RSVF, &v) == C_FOUND && v != 0) {
+            char up[PLAT_PORT_NAME_MAX];
+            u32 i;
+            for (i = 0; i < len && i < PLAT_PORT_NAME_MAX - 1; i++) up[i] = up_char(name[i]);
+            up[i] = '\0';
+            fast = fast_codes(up, mch);
+        }
+    }
+    serial_rates_for(fast, WP_TRUE, rates, cap, &n, hard_from);
+    return n;
+}
+
 static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
                              plat_transport **out)
 {
@@ -354,8 +535,26 @@ static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
     if (colon == NULL || colon == rest) return WP_ERR; /* need a non-empty <device> */
     if (!parse_baud(colon + 1, baud_end, &baud_idx)) return WP_ERR;
 
-    t = (atari_transport *)mem_alloc((u32)sizeof(atari_transport));
-    if (t == NULL) return WP_NOMEM;
+    /* A named port (MODEM2, SERIAL2, ...) becomes AUX for as long as
+       the link is open; "aux", a path, or any other word keeps AUX as it
+       is, the meaning <device> always had. A port word this machine does
+       not have is refused rather than quietly taken to mean AUX. */
+    {
+        u32 devlen = (u32)(colon - rest);
+        short dev = port_device(rest, devlen);
+
+        if (dev == 0 && is_port_word(rest, devlen)) return WP_ERR;
+        t = (atari_transport *)mem_alloc((u32)sizeof(atari_transport));
+        if (t == NULL) return WP_NOMEM;
+        t->old_map = 0;
+        if (dev != 0) {
+            long was = Bconmap(-1);
+            if (was != (long)dev) {
+                (void)Bconmap(dev);
+                t->old_map = (short)was;
+            }
+        }
+    }
     t->kind = TRANSPORT_SERIAL;
     t->opened = WP_TRUE;
     t->fd = ATARI_NO_NODE;
@@ -406,7 +605,19 @@ static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
                 if (rest[i] == '/') looks_like_path = WP_TRUE;
             }
             devbuf[devlen] = '\0';
-            if (looks_like_path) t->fd = open_serial_node(devbuf);
+            if (looks_like_path) {
+                t->fd = open_serial_node(devbuf);
+            } else if (is_port_word(devbuf, devlen) && devlen + 7 < (u32)sizeof(devbuf)) {
+                /* The chosen port's own node: u:/dev/modem2 for MODEM2. */
+                char node[64];
+                u32 k;
+                memcpy(node, "u:/dev/", 7);
+                for (k = 0; k < devlen; k++)
+                    node[7 + k] = (char)(devbuf[k] >= 'A' && devbuf[k] <= 'Z' ? devbuf[k] - 'A' + 'a' : devbuf[k]);
+                node[7 + devlen] = '\0';
+                t->fd = open_serial_node(node);
+                if (t->fd == ATARI_NO_NODE) t->fd = open_serial_node(node + 2);
+            }
         }
 
         for (i = 0; t->fd == ATARI_NO_NODE && atari_serial_nodes[i] != (const char *)0; i++) {
@@ -525,6 +736,7 @@ static void serial_close(plat_transport *t)
     atari_transport *at = (atari_transport *)t;
 
     if (at != NULL && at->fd != ATARI_NO_NODE) Fclose(at->fd);
+    if (at != NULL && at->old_map >= 6) (void)Bconmap(at->old_map);
     mem_free(t);
 }
 
@@ -1019,6 +1231,23 @@ static wp_bool rate_ok(const atari_transport *at, const atari_rate *r)
     if (r->needs_rsvf && (at->fast & (1u << (r->code - 10))) == 0) return WP_FALSE;
     if (r->needs_hard && at->flow != FLOW_HARD) return WP_FALSE;
     return WP_TRUE;
+}
+
+/* The rates a port with these fast codes takes, with RTS/CTS on or not;
+   the slowest that needs RTS/CTS in *hard_from. */
+static void serial_rates_for(unsigned char fast, wp_bool hard, u32 *rates, u32 cap, u32 *n,
+                             u32 *hard_from)
+{
+    atari_transport probe;
+    u32 i;
+
+    probe.fast = fast;
+    probe.flow = hard ? FLOW_HARD : FLOW_NONE;
+    for (i = 0; i < ATARI_RATE_COUNT && *n < cap; i++) {
+        if (!rate_ok(&probe, &k_atari_rates[i])) continue;
+        rates[(*n)++] = k_atari_rates[i].baud;
+        if (k_atari_rates[i].needs_hard && hard_from) *hard_from = k_atari_rates[i].baud;
+    }
 }
 
 u32 plat_transport_speeds(plat_transport *t, u32 *rates, u32 cap, u32 *current)

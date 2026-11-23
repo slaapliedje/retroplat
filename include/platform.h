@@ -452,6 +452,35 @@ u32       plat_transport_speeds(plat_transport *t, u32 *rates, u32 cap, u32 *cur
 wp_status plat_transport_set_speed(plat_transport *t, u32 baud);
 void      plat_transport_close(plat_transport *t);
 
+/* The machine's serial ports, for a program to offer a choice of them
+   before anything is opened -- many machines have more than one: a TT's
+   four, a Mac's modem and printer ports, a PC's COM1-COM4.
+   plat_serial_ports: up to `cap` of them, in the order the machine's
+   own manuals give. `name` is what goes in a "serial:<device>:..."
+   endpoint (case is not significant there); `label` is what to show. A
+   port marked PLAT_PORT_BUSY exists but another part of the system
+   holds it (a Mac's printer port under AppleTalk), and opening it is
+   WP_ERR. PLAT_PORT_CURRENT marks the port an endpoint's "aux" means
+   now, on a machine where a name like that exists. 0 where there is no
+   serial port or no way to tell (then "aux" is still the one port).
+   plat_serial_port_speeds: the rates that port can be opened at or
+   raised to, fastest first -- what plat_transport_speeds would list once
+   it is open with RTS/CTS on. *hard_from (may be NULL) is the slowest
+   rate that needs RTS/CTS (an endpoint's ":hard"), 0 if none does. 0
+   for a name this machine does not have. */
+#define PLAT_PORT_NAME_MAX   24
+#define PLAT_PORT_LABEL_MAX  24
+#define PLAT_PORT_BUSY       0x01u
+#define PLAT_PORT_CURRENT    0x02u
+typedef struct {
+    char name[PLAT_PORT_NAME_MAX];
+    char label[PLAT_PORT_LABEL_MAX];
+    u8   flags;
+} plat_serial_port;
+
+u32 plat_serial_ports(plat_serial_port *out, u32 cap);
+u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_from);
+
 
 /* ------------------------------------------------------------------ */
 /* Encoding edge: native charset <-> UTF-8 (skills/encoding.md, Edge A) */

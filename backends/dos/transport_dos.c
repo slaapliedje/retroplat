@@ -12,7 +12,8 @@
    WP_UNSUPPORTED here, honestly, not silently accepted.
 
    endpoint format: "serial:<device>:<baud>" (platform.h). <device> is
-   the COM port: 0=COM1, 1=COM2, 2=COM3, 3=COM4. Its I/O base comes from
+   the COM port: COM1 to COM4 (any case), or the older spelling 0=COM1,
+   1=COM2, 2=COM3, 3=COM4. Its I/O base comes from
    the BIOS data area's table at 0040:0000 (what POST found), else the
    standard addresses. <baud> is any rate whose divisor of 115200 is a
    whole number, 300 to 115200.
@@ -45,6 +46,11 @@ static wp_bool parse_port(const char *s, const char *end, int *out_port)
     long value = 0;
     wp_bool any_digit = WP_FALSE;
 
+    if (end - s == 4 && (s[0] == 'C' || s[0] == 'c') && (s[1] == 'O' || s[1] == 'o') &&
+        (s[2] == 'M' || s[2] == 'm') && s[3] >= '1' && s[3] <= '4') {
+        *out_port = s[3] - '1';
+        return WP_TRUE;
+    }
     while (s < end && *s >= '0' && *s <= '9') {
         value = value * 10 + (long)(*s - '0');
         s++;
@@ -230,4 +236,54 @@ wp_status plat_transport_set_speed(plat_transport *t, u32 baud)
     outp(dt->base + UART_LCR, 0x03);
     dt->divisor = divisor;
     return WP_OK;
+}
+
+/* The COM ports POST found: those with an address in the BIOS data
+   area's table. None there (a BIOS that does not fill it), COM1 at its
+   standard address, which is what an endpoint for it has always used. */
+u32 plat_serial_ports(plat_serial_port *out, u32 cap)
+{
+    unsigned short __far *bda = (unsigned short __far *)MK_FP(0x0040, 0x0000);
+    u32 i, n = 0;
+
+    for (i = 0; i < 4u && n < cap; i++) {
+        if (bda[i] == 0) continue;
+        strcpy(out[n].name, "COM1");
+        out[n].name[3] = (char)('1' + i);
+        strcpy(out[n].label, out[n].name);
+        out[n].flags = 0;
+        n++;
+    }
+    if (n == 0 && cap > 0) {
+        strcpy(out[0].name, "COM1");
+        strcpy(out[0].label, "COM1");
+        out[0].flags = 0;
+        n = 1;
+    }
+    return n;
+}
+
+/* A port's rates, as plat_transport_speeds lists them once it is open:
+   which depends on whether its UART is a 16550 with a FIFO. Asking turns
+   the FIFO on (trigger level one byte, so a driver already using the
+   port sees the same interrupts as before) and reads IIR, exactly as
+   opening it does. */
+u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_from)
+{
+    int port;
+    unsigned base;
+    const u32 *list;
+    u32 count, i, n = 0;
+    wp_bool fifo;
+
+    if (hard_from) *hard_from = 0;
+    if (!parse_port(name, name + strlen(name), &port)) return 0;
+    base = port_base(port);
+    outp(base + UART_FCR, 0x01);
+    fifo = (wp_bool)((inp(base + UART_IIR) & 0xC0) == 0xC0);
+    list = fifo ? k_dos_fifo_rates : k_dos_plain_rates;
+    count = fifo ? (u32)(sizeof(k_dos_fifo_rates) / sizeof(k_dos_fifo_rates[0]))
+                 : (u32)(sizeof(k_dos_plain_rates) / sizeof(k_dos_plain_rates[0]));
+    for (i = 0; i < count && n < cap; i++) rates[n++] = list[i];
+    return n;
 }

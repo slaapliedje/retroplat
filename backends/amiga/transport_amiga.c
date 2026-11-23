@@ -30,14 +30,38 @@
    endpoint convention exactly -- only <baud> differs in shape (Amiga's
    io_Baud takes a true baud value directly; there is no BAUD_* index
    table to map into the way Atari's Rsconf needs, so parsing is simpler
-   here, not harder). <device> is parsed but unvalidated beyond
-   "non-empty", same as Atari -- a stock Amiga has exactly one built-in
-   serial port (unit 0), so there is nothing to select, but the field is
-   kept for the same forward-compatibility reason Atari's own comment
-   gives. "tcp:<host>:<port>" is a TCP client over bsdsocket.library
+   here, not harder). <device> is a device and unit, "<name>.device:<unit>"
+   or "<name>.device" for unit 0 -- a serial card's own driver, or
+   serial.device's other units -- and any other word ("aux") the built-in
+   port, serial.device unit 0, as it always was (M21 T21.7). "tcp:<host>:<port>" is a TCP client over bsdsocket.library
    (AmiTCP, Miami, Roadshow, or an emulator's own bsdsocket emulation),
    further down this file; a machine with no TCP stack running answers
    WP_UNSUPPORTED from plat_transport_open, never a hang. */
+
+/* <device> -> the device's name (into `name`) and unit. */
+static void parse_device(const char *dev, u32 len, char *name, u32 cap, ULONG *unit)
+{
+    u32 i, end = len;
+    ULONG u = 0;
+    wp_bool dotdev = WP_FALSE;
+
+    *unit = 0;
+    /* A trailing ":<digits>" is the unit. */
+    for (i = len; i > 0 && dev[i - 1] >= '0' && dev[i - 1] <= '9'; i--) { }
+    if (i > 1 && i < len && dev[i - 1] == ':') {
+        u32 k;
+        for (k = i; k < len; k++) u = u * 10 + (ULONG)(dev[k] - '0');
+        end = i - 1;
+    }
+    if (end >= 7 && strncmp(dev + end - 7, ".device", 7) == 0) dotdev = WP_TRUE;
+    if (!dotdev || end >= cap) {
+        strcpy(name, SERIALNAME);
+        return;
+    }
+    memcpy(name, dev, end);
+    name[end] = '\0';
+    *unit = u;
+}
 
 static wp_bool parse_baud(const char *s, ULONG *out_baud)
 {
@@ -98,7 +122,8 @@ static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
     amiga_transport *t;
     const char *rest;
     const char *colon;
-    ULONG baud;
+    ULONG baud, unit;
+    char devname[64];
 
     WP_UNUSED(connect_timeout_ms); /* SDCMD_SETPARAMS takes effect
                                        immediately -- there is no
@@ -112,6 +137,7 @@ static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
     colon = strrchr(rest, ':');
     if (colon == NULL || colon == rest || colon[1] == '\0') return WP_ERR;
     if (!parse_baud(colon + 1, &baud)) return WP_ERR;
+    parse_device(rest, (u32)(colon - rest), devname, (u32)sizeof(devname), &unit);
 
     t = (amiga_transport *)mem_alloc((u32)sizeof(amiga_transport));
     if (t == NULL) return WP_NOMEM;
@@ -133,7 +159,7 @@ static wp_status serial_open(const char *endpoint, u32 connect_timeout_ms,
     t->ioreq = (struct IOExtSer *)CreateIORequest(t->port, (ULONG)sizeof(struct IOExtSer));
     if (t->ioreq == NULL) { close_transport(t); return WP_ERR; }
 
-    if (OpenDevice((CONST_STRPTR)SERIALNAME, 0, (struct IORequest *)t->ioreq, 0) != 0) {
+    if (OpenDevice((CONST_STRPTR)devname, unit, (struct IORequest *)t->ioreq, 0) != 0) {
         close_transport(t);
         return WP_ERR;
     }
@@ -552,4 +578,27 @@ void plat_transport_close(plat_transport *t)
         tcp_close((amiga_tcp *)t);
     else
         close_transport((amiga_transport *)t);
+}
+
+/* The built-in port. A serial card's driver cannot be told from any
+   other device from here, so it is not listed: an endpoint names it
+   ("serial:duart.device:1:9600"), and Settings shows that as itself. */
+u32 plat_serial_ports(plat_serial_port *out, u32 cap)
+{
+    if (cap == 0) return 0;
+    strcpy(out[0].name, SERIALNAME);
+    strcpy(out[0].label, "Serial port");
+    out[0].flags = 0;
+    return 1;
+}
+
+u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_from)
+{
+    u32 i, n = 0, top = amiga_rate_ceiling();
+
+    WP_UNUSED(name);           /* every device: the CPU sets the ceiling */
+    if (hard_from) *hard_from = 0;
+    for (i = 0; i < AMIGA_RATE_COUNT && n < cap; i++)
+        if (k_amiga_rates[i] <= top) rates[n++] = k_amiga_rates[i];
+    return n;
 }

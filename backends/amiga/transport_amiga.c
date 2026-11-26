@@ -602,3 +602,14 @@ u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_fro
         if (k_amiga_rates[i] <= top) rates[n++] = k_amiga_rates[i];
     return n;
 }
+
+/* A TCP stack is running when bsdsocket.library opens (AmiTCP, Miami,
+   Roadshow, an emulator's own); asked, then let go again. */
+wp_bool plat_network_available(void)
+{
+    struct Library *b = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
+
+    if (b == NULL) return WP_FALSE;
+    CloseLibrary(b);
+    return WP_TRUE;
+}

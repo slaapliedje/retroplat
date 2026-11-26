@@ -1373,3 +1373,13 @@ void plat_transport_close(plat_transport *t)
 #endif
     serial_close(t);
 }
+
+/* Only a build with MiNTnet's code in it, under MiNT. */
+wp_bool plat_network_available(void)
+{
+#ifdef RP_ATARI_TCP
+    return have_mint();
+#else
+    return WP_FALSE;
+#endif
+}

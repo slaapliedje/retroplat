@@ -431,3 +431,10 @@ u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_fro
     }
     return 0;
 }
+
+/* The host always has TCP; RP_HOST_NO_NETWORK set (to anything) plays a
+   machine without it, for the tests. */
+wp_bool plat_network_available(void)
+{
+    return getenv("RP_HOST_NO_NETWORK") == NULL ? WP_TRUE : WP_FALSE;
+}

@@ -403,9 +403,11 @@ wp_status plat_dialog_form(plat_window *parent,
                      is deliberately not offered -- in-band CTRL-S/CTRL-Q
                      would be eaten out of this protocol's own binary
                      length/seq/CRC fields; see transport_atari.c.
-                     <baud> tops out at 19200, the Rsconf() ceiling.
-                     "tcp:" is WP_UNSUPPORTED there -- plain TOS has no
-                     sockets; see docs/atari-platform.md.
+                     <device> is aux or a port name (MODEM2 ...). <baud>
+                     is the start speed; the link climbs past 19200 only
+                     on ports whose fast Rsconf codes are known.
+                     "tcp:" needs MiNTnet and a build with RP_ATARI_TCP,
+                     else WP_UNSUPPORTED; see docs/atari-platform.md.
    Swapping transports for a new target means implementing these four
    functions again -- no change to offload.h, offload_client.c, or
    offload/transport is required. */
@@ -480,6 +482,14 @@ typedef struct {
 
 u32 plat_serial_ports(plat_serial_port *out, u32 cap);
 u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_from);
+
+/* WP_TRUE when "tcp:<host>:<port>" can work on this machine as it runs
+   now: a TCP stack is built in AND present (MiNT on an Atari built with
+   RP_ATARI_TCP; bsdsocket.library on an Amiga). WP_FALSE where the
+   backend has no TCP at all (DOS, Mac, gem4xe, plain TOS). A settings
+   form offers a network link only when this is true. It does not
+   promise a connection -- the far end may still not answer. */
+wp_bool plat_network_available(void);
 
 
 /* ------------------------------------------------------------------ */

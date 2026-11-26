@@ -384,3 +384,9 @@ u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_fro
     for (i = 0; i < MAC_RATE_COUNT && n < cap; i++) rates[n++] = k_mac_rates[i];
     return n;
 }
+
+/* MacTCP / Open Transport are not wired in. */
+wp_bool plat_network_available(void)
+{
+    return WP_FALSE;
+}

@@ -287,3 +287,9 @@ u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_fro
     for (i = 0; i < count && n < cap; i++) rates[n++] = list[i];
     return n;
 }
+
+/* No TCP stack here (a packet driver is not wired in). */
+wp_bool plat_network_available(void)
+{
+    return WP_FALSE;
+}

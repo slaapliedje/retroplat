@@ -126,6 +126,8 @@ static u32 g_form_edit_count = 0;
 static u32 g_form_batch = 0;                    /* the form window_host_form_edit adds to */
 static wp_bool g_form_cancel[HOST_FORM_AHEAD];
 static u32 g_form_count = 0;
+static plat_form_field g_form_last[PLAT_FORM_MAX_FIELDS];   /* the last form, as it was shown */
+static u32 g_form_last_n = 0;
 
 wp_status plat_dialog_form(plat_window *parent,
                             const u8 *title_utf8, u32 title_len,
@@ -141,6 +143,8 @@ wp_status plat_dialog_form(plat_window *parent,
     g_last_title[i] = '\0';
     if (count == 0 || count > PLAT_FORM_MAX_FIELDS || fields == NULL) return WP_RANGE;
     g_form_count++;
+    for (i = 0; i < count; i++) g_form_last[i] = fields[i];
+    g_form_last_n = count;
     *out_cancelled = g_form_cancel[0];
     kept = 0;
     for (i = 0; i < g_form_edit_count; i++) {
@@ -198,4 +202,10 @@ void window_host_form_next(void)
 u32 window_host_form_count(void)
 {
     return g_form_count;
+}
+
+const plat_form_field *window_host_form_last(u32 *count)
+{
+    if (count != NULL) *count = g_form_last_n;
+    return g_form_last_n > 0 ? g_form_last : NULL;
 }

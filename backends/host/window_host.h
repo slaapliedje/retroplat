@@ -32,5 +32,9 @@ void window_host_form_edit(u32 field, const char *text, i32 index);
 void window_host_form_cancel(void);
 void window_host_form_next(void);
 u32  window_host_form_count(void);
+/* The fields of the last form shown, copied as they were when it was
+   shown (labels and option lists still point into the caller), and how
+   many. */
+const plat_form_field *window_host_form_last(u32 *count);
 
 #endif /* WP_WINDOW_HOST_H */

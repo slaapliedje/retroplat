@@ -88,7 +88,16 @@ typedef struct {
    enough between the two handles' default vs requested sizes to not
    visibly overlap) but produced real, visible double-struck/ghosted
    text at ST High, where the DPI difference made the gap large. */
-void atari_select_font(VdiHdl vdi, const atari_font *f);
+short atari_select_font(VdiHdl vdi, const atari_font *f);   /* the cell height it got */
+/* f's effects on vdi again, without the slant when upright. */
+void atari_set_effects(VdiHdl vdi, const atari_font *f, wp_bool upright);
+
+/* Draws utf8 at x with its baseline on y through gc on vdi -- or, with gc
+   NULL, only measures it -- in f, which atari_select_font has selected on
+   vdi with cell height cellh, and answers its width in pixels. The Greek
+   the font lacks is drawn from greek_glyphs.h (draw_atari.c). */
+i32 atari_text_run(VdiHdl vdi, plat_gc *gc, const atari_font *f, short cellh,
+                   i32 x, i32 y, const u8 *utf8, u32 len, u8 r, u8 g, u8 b);
 
 /* One-time-per-handle: if a scalable-font GDOS is resident, loads its
    fonts for vdi so atari_select_font's vst_point can hit the exact

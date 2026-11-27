@@ -59,3 +59,17 @@ known lint error -- because "0 errors found" is also what a pipeline that
 never compiled anything prints. Stages headers and sources flat and
 compiles from inside the stage (see the README for why). Run so far only
 with Golden Gate's Windows build under Wine.
+
+## make_greek_glyphs.py — Atari Greek
+
+`greek_glyphs.txt` is the Greek the Atari backend draws where the ST's
+system font has none (or has it two rows off the baseline, as its 8x16
+Greek block is): 34 letters and the tonos and dialytika, drawn for
+retroplat in the system font's style at 8x16 and 8x8 -- original
+drawings, not taken from any font. The text file is the source, with the
+rows as `#` and `.`; the script checks every glyph's rows and width and
+that each one is used, and writes `backends/atari/greek_glyphs.h` with
+the table from Unicode to what draws each character.
+
+    python3 tools/make_greek_glyphs.py
+

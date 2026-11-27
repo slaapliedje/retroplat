@@ -4,6 +4,7 @@
 #include "platform.h"
 #include "utf8.h"
 #include "metrics_atari_internal.h"
+#include "greek_glyphs.h"
 
 /* The Atari ST character set's upper half, as Unicode: 0x80 + i shows
    g_atari_hi[i]; 0 for a code not mapped here (the Hebrew block 0xC2-0xDC
@@ -31,10 +32,27 @@ static const u16 g_atari_hi[128] = {
     0x00B0, 0x2022, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x00B3, 0x00AF
 };
 
-/* Unicode to the Atari set: ASCII as itself, the upper half through
-   g_atari_hi above, and a character the set lacks as
-   utf8_ascii_fallback's nearest plain one; only one with none becomes
-   '?', counted in *unmapped_count. */
+/* The Greek block (greek_glyphs.h, from tools/greek_glyphs.txt): what
+   draws cp, or NULL when it is not Greek. */
+static const gk_char *gk_find(u32 cp)
+{
+    u32 lo = 0, hi = GK_CHARS;
+
+    if (cp < 0x037E || (cp > 0x03CE && cp != 0x2126)) return NULL;
+    while (lo < hi) {
+        u32 mid = (lo + hi) / 2;
+        if (gk_chars[mid].cp == cp) return &gk_chars[mid];
+        if (gk_chars[mid].cp < cp) lo = mid + 1; else hi = mid;
+    }
+    return NULL;
+}
+
+/* Unicode to the Atari set: ASCII as itself, a Greek capital the shape
+   of a Latin one as that Latin one, the upper half through g_atari_hi
+   above, and a character the set lacks as utf8_ascii_fallback's nearest
+   plain one; only one with none becomes '?', counted in *unmapped_count.
+   Text drawn in a document gets the rest of Greek too (atari_text_run);
+   this is what a dialog, a menu or the clipboard can show. */
 wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
                                u8 *out, u32 out_cap, u32 *out_len,
                                u32 *unmapped_count)
@@ -58,6 +76,9 @@ wp_status plat_utf8_to_native(const u8 *utf8, u32 len,
 
         if (cp <= 0x7F) {
             out[written++] = (u8)cp;
+        } else if (gk_find(cp) != NULL && gk_find(cp)->glyph == 0 && gk_find(cp)->over == 0 &&
+                   gk_find(cp)->pre == 0) {
+            out[written++] = gk_find(cp)->base;   /* a Latin lookalike: few enough to look up again */
         } else {
             u32 k;
             for (k = 0; k < 128 && g_atari_hi[k] != cp; k++) {}
@@ -110,21 +131,176 @@ static short rgb_to_vdi_color(u8 r, u8 g, u8 b)
     return atari_nearest_pen(r, g, b);
 }
 
+/* ---- Text, with the Greek the ST's font lacks ----------------------
+   The ST's system font has a Greek block, but at 8x16 it sits two rows
+   above the Latin letters' baseline (it was drawn for mathematics), and
+   it lacks most of the alphabet. So Greek is drawn from greek_glyphs.h
+   wherever a document's text is: a capital the shape of a Latin one is
+   that Latin one in the font in use, everything else a glyph of ours,
+   scaled to the font's cell, with its tonos or dialytika drawn over it.
+   The text is walked in runs: what the font has goes to v_gtext (or
+   vqt_extent, measuring) in one call, a glyph of ours by itself. */
+
+#define GK_MAX_SCALE 8
+/* A glyph's widest bitmap: 8 pixels a source pixel, and room for an
+   italic lean (up to 7 rows' worth right, 1 left). */
+#define GK_MAX_WORDS ((16 * GK_MAX_SCALE + 15) / 16)
+static u16 g_gk_bits[16 * GK_MAX_SCALE * GK_MAX_WORDS];
+
+/* The source size and scale for a font whose cell is cellh pixels:
+   8x16 from a 12-pixel cell up, 8x8 below; scaled by whole pixels to
+   the nearest fit. */
+static void gk_scale(short cellh, wp_bool *big, i32 *s)
+{
+    *big = (wp_bool)(cellh >= 12);
+    *s = *big ? ((i32)cellh + 8) / 16 : ((i32)cellh + 4) / 8;
+    if (*s < 1) *s = 1;
+    if (*s > GK_MAX_SCALE) *s = GK_MAX_SCALE;
+}
+
+/* Glyph gi (0-based) at x, its baseline on y, scaled by s; leaning as
+   the VDI's skew leans the font when italic -- a pixel right for every
+   two rows above the baseline, left below it. */
+static void gk_draw(plat_gc *gc, u8 gi, wp_bool big, i32 s, wp_bool italic,
+                    i32 x, i32 y, u8 r, u8 g, u8 b)
+{
+    const u8 *src = big ? gk_rows16[gi] : gk_rows8[gi];
+    i32 h = (big ? 16 : 9) * s;
+    i32 w = 8 * s;
+    i32 base = big ? 14 * s - 1 : 8 * s - 1;   /* the output row the baseline is on */
+    i32 left = italic ? s : 0;
+    i32 full = italic ? w + 8 * s : w;
+    u32 wpr = (u32)(full + 15) / 16;
+    i32 top = y - base;
+    i32 oy, px;
+
+    for (oy = 0; oy < h; oy++) {
+        u16 *row = g_gk_bits + (u32)oy * wpr;
+        u8 bits = src[oy / s];
+        i32 lean = 0;
+        if (italic) {
+            i32 d = base - oy;
+            lean = d >= 0 ? d / 2 : -((1 - d) / 2);
+        }
+        memset(row, 0, wpr * sizeof(u16));
+        if (bits == 0) continue;
+        for (px = 0; px < w; px++) {
+            if (bits & (0x80u >> (u32)(px / s))) {
+                i32 at = px + left + lean;
+                if (at >= 0 && at < full) row[at / 16] |= (u16)(0x8000u >> (u32)(at % 16));
+            }
+        }
+    }
+    (void)plat_draw_mono(gc, x - left, top, full, h, g_gk_bits, wpr, r, g, b);
+}
+
+/* The width vqt_extent gives text, in pixels -- upright: a slanted
+   glyph leans over its neighbour and advances by the upright width,
+   while vqt_extent counts the lean as well, which left a gap after every
+   italic run. The font's own effects are put back after. */
+static i32 extent_px(VdiHdl vdi, const atari_font *af, const char *text)
+{
+    short extent[8];
+    short min_x, max_x;
+    u32 i;
+    wp_bool italic = (wp_bool)((af->style_flags & PLAT_STYLE_ITALIC) != 0);
+
+    if (text[0] == '\0') return 0;
+    if (italic) atari_set_effects(vdi, af, WP_TRUE);
+    vqt_extent(vdi, (char *)text, extent);
+    if (italic) atari_set_effects(vdi, af, WP_FALSE);
+    min_x = max_x = extent[0];
+    for (i = 2; i <= 6; i += 2) {
+        if (extent[i] < min_x) min_x = extent[i];
+        if (extent[i] > max_x) max_x = extent[i];
+    }
+    return (i32)(max_x - min_x);
+}
+
+i32 atari_text_run(VdiHdl vdi, plat_gc *gc, const atari_font *af, short cellh,
+                   i32 x, i32 y, const u8 *utf8, u32 len, u8 r, u8 g, u8 b)
+{
+    char seg[128];
+    u32 seg_n = 0, pos = 0;
+    i32 x0 = x;
+    wp_bool big;
+    i32 s;
+    wp_bool bold = (wp_bool)((af->style_flags & PLAT_STYLE_BOLD) != 0);
+    wp_bool under = (wp_bool)((af->style_flags & PLAT_STYLE_UNDERLINE) != 0);
+    wp_bool italic = (wp_bool)((af->style_flags & PLAT_STYLE_ITALIC) != 0);
+
+    gk_scale(cellh, &big, &s);
+
+#define GK_FLUSH() do { \
+        if (seg_n > 0) { \
+            seg[seg_n] = '\0'; \
+            if (gc != NULL) v_gtext(vdi, (short)x, (short)y, seg); \
+            x += extent_px(vdi, af, seg); \
+            seg_n = 0; \
+        } \
+    } while (0)
+
+    while (pos < len) {
+        u32 cp;
+        u32 n = utf8_decode(utf8 + pos, len - pos, &cp);
+        const gk_char *e;
+
+        if (n == 0) { cp = '?'; n = 1; }
+        e = gk_find(cp);
+        if (e == NULL || (e->glyph == 0 && e->over == 0 && e->pre == 0)) {
+            u8 one = 0;
+            u32 got = 0;
+            if (e != NULL) one = e->base;
+            else (void)plat_utf8_to_native(utf8 + pos, n, &one, 1, &got, NULL);
+            if (e == NULL && got == 0) one = '?';
+            if (seg_n + 1 >= sizeof(seg)) GK_FLUSH();
+            seg[seg_n++] = (char)one;
+        } else {
+            i32 w, cx;
+            GK_FLUSH();
+            if (e->pre != 0) {
+                i32 pw = (i32)gk_advance[e->pre - 1] * s;
+                if (gc != NULL) gk_draw(gc, (u8)(e->pre - 1), big, s, italic, x, y, r, g, b);
+                if (gc != NULL && under) (void)plat_fill_rect(gc, x, y + s, pw, s, r, g, b);
+                x += pw;
+            }
+            cx = x;
+            if (e->glyph != 0) {
+                w = (i32)gk_advance[e->glyph - 1] * s + (bold ? 1 : 0);
+                if (gc != NULL) {
+                    gk_draw(gc, (u8)(e->glyph - 1), big, s, italic, x, y, r, g, b);
+                    if (bold) gk_draw(gc, (u8)(e->glyph - 1), big, s, italic, x + 1, y, r, g, b);
+                    if (under) (void)plat_fill_rect(gc, x, y + s, w, s, r, g, b);
+                }
+            } else {
+                char one[2];
+                one[0] = (char)e->base;
+                one[1] = '\0';
+                w = extent_px(vdi, af, one);
+                if (gc != NULL) v_gtext(vdi, (short)x, (short)y, one);
+            }
+            if (e->over != 0 && gc != NULL) {
+                i32 ox = cx + (w - 8 * s) / 2;
+                gk_draw(gc, (u8)(e->over - 1), big, s, italic, ox, y, r, g, b);
+                if (bold) gk_draw(gc, (u8)(e->over - 1), big, s, italic, ox + 1, y, r, g, b);
+            }
+            x = cx + w;
+        }
+        pos += n;
+    }
+    GK_FLUSH();
+#undef GK_FLUSH
+    return x - x0;
+}
+
 wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
                           const u8 *utf8, u32 len, u8 r, u8 g, u8 b)
 {
     atari_gc *agc = (atari_gc *)gc;
     const atari_font *af = (const atari_font *)f;
-    char buf[256];
-    u32 n, out_len, unmapped;
-    wp_status st;
+    short cellh;
 
     if (agc == NULL || af == NULL) return WP_ERR;
-
-    n = (len < sizeof(buf) - 1) ? len : (u32)(sizeof(buf) - 1);
-    st = plat_utf8_to_native(utf8, n, (u8 *)buf, (u32)(sizeof(buf) - 1), &out_len, &unmapped);
-    if (st != WP_OK) return st;
-    buf[out_len] = '\0';
 
     /* v_gtext draws with ITS OWN handle's (agc->vdi) current text
        attributes -- a real, distinct handle from g_metrics_vdi, which
@@ -142,13 +318,13 @@ wp_status plat_draw_text(plat_gc *gc, plat_font *f, i32 x, i32 y,
        2.06 and 3.06, v_gtext on a printer workstation before any
        vst_font bus-errors in the ROM (Hatari, 2026-11-15; vst_font(h, 1)
        first, then either vst_point or vst_height, prints cleanly). */
-    atari_select_font(agc->vdi, af);
+    cellh = atari_select_font(agc->vdi, af);
     vst_color(agc->vdi, rgb_to_vdi_color(r, g, b));
     /* Transparent: in replace mode v_gtext paints each character cell's
        background, which punched white holes in a paragraph's shading.
        Every caller clears behind its text first. */
     vswr_mode(agc->vdi, MD_TRANS);
-    v_gtext(agc->vdi, (short)x, (short)y, buf);
+    (void)atari_text_run(agc->vdi, gc, af, cellh, x, y, utf8, len, r, g, b);
     vswr_mode(agc->vdi, MD_REPLACE);
     return WP_OK;
 }

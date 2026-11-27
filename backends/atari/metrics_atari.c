@@ -562,12 +562,21 @@ static void select_face_size(VdiHdl vdi, const atari_font *f, short *cellh_out)
     *cellh_out = cellh;
 }
 
-void atari_select_font(VdiHdl vdi, const atari_font *f)
+void atari_set_effects(VdiHdl vdi, const atari_font *f, wp_bool upright)
+{
+    u16 flags = f->style_flags;
+
+    if (upright) flags = (u16)(flags & ~PLAT_STYLE_ITALIC);
+    vst_effects(vdi, map_effects(flags));
+}
+
+short atari_select_font(VdiHdl vdi, const atari_font *f)
 {
     short cellh;
 
     select_face_size(vdi, f, &cellh);
     vst_effects(vdi, map_effects(f->style_flags));
+    return cellh;
 }
 
 static const char *face_name_at(u32 index, void *user)
@@ -760,50 +769,17 @@ wp_status plat_measure_text(plat_font *f, const u8 *utf8, u32 len,
                              i32 *width_twips_out)
 {
     atari_font *af = (atari_font *)f;
-    char buf[256];
-    u32 n, i;
-    short extent[8];
-    short min_x, max_x;
-    wp_status st;
+    short cellh;
 
     if (af == NULL || width_twips_out == NULL) return WP_ERR;
     if (plat_metrics_paper()) return plat_paper_measure(&af->paper, utf8, len, width_twips_out);
 
-    n = (len < sizeof(buf) - 1) ? len : (u32)(sizeof(buf) - 1);
-    /* No real Atari-ST-charset mapping table yet (plat_utf8_to_native is
-       ASCII-passthrough-plus-'?' -- see draw_atari.c and
-       docs/atari-platform.md); reuse it here so measurement and drawing
-       agree on what bytes are actually being rendered. */
-    {
-        u32 out_len = 0;
-        u32 unmapped = 0;
-        st = plat_utf8_to_native(utf8, n, (u8 *)buf, (u32)(sizeof(buf) - 1), &out_len, &unmapped);
-        if (st != WP_OK) return st;
-        n = out_len;
-    }
-    buf[n] = '\0';
-
-    atari_select_font(g_metrics_vdi, af);
-    /* Slanting draws a glyph leaning over its neighbour and advances by
-       the upright width; vqt_extent counts the lean as well, which left a
-       gap after every italic word. Measured upright, the advance is what
-       the next word is placed by. */
-    if (af->style_flags & PLAT_STYLE_ITALIC) {
-        vst_effects(g_metrics_vdi, map_effects((u16)(af->style_flags & ~PLAT_STYLE_ITALIC)));
-    }
-
-    if (n == 0) {
-        *width_twips_out = 0;
-        return WP_OK;
-    }
-
-    vqt_extent(g_metrics_vdi, buf, extent);
-    min_x = max_x = extent[0];
-    for (i = 2; i <= 6; i += 2) {
-        if (extent[i] < min_x) min_x = extent[i];
-        if (extent[i] > max_x) max_x = extent[i];
-    }
-
-    *width_twips_out = atari_px_to_twips_x((i32)(max_x - min_x));
+    cellh = atari_select_font(g_metrics_vdi, af);
+    /* The same walk drawing does (draw_atari.c), so a line is measured
+       as it will be drawn: the font's own characters by vqt_extent,
+       upright (an italic glyph advances by its upright width), the Greek
+       it lacks by the glyphs' advance. */
+    *width_twips_out = atari_px_to_twips_x(atari_text_run(g_metrics_vdi, NULL, af, cellh, 0, 0,
+                                                          utf8, len, 0, 0, 0));
     return WP_OK;
 }

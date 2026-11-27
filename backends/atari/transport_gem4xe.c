@@ -96,13 +96,13 @@ u32 plat_serial_port_speeds(const char *name, u32 *rates, u32 cap, u32 *hard_fro
     return 0;
 }
 
+wp_bool plat_network_available(void)
+{
+    return WP_FALSE;
+}
+
 #else
 
 typedef int rp_transport_gem4xe_not_this_target;
 
 #endif
-
-wp_bool plat_network_available(void)
-{
-    return WP_FALSE;
-}

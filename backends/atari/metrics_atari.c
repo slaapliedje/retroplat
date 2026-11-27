@@ -233,6 +233,13 @@ wp_status atari_metrics_printer(VdiHdl printer, const short *work_out, short fac
     return WP_OK;
 }
 
+wp_bool atari_measuring_printer(i32 *px_um_x, i32 *px_um_y)
+{
+    *px_um_x = g_px_um_x;
+    *px_um_y = g_px_um_y;
+    return g_measuring_printer;
+}
+
 void atari_metrics_screen(void)
 {
     if (!g_measuring_printer) return;

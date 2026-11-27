@@ -124,6 +124,11 @@ void atari_ensure_gdos_fonts(VdiHdl vdi);
 wp_status atari_metrics_printer(VdiHdl printer, const short *work_out, short faces);
 void      atari_metrics_screen(void);
 
+/* WP_TRUE while measuring a printer (atari_metrics_printer), with its
+   pixel's width and height in microns; WP_FALSE on the screen. Greek is
+   drawn to the font's cell on paper, by whole pixels on a screen. */
+wp_bool   atari_measuring_printer(i32 *px_um_x, i32 *px_um_y);
+
 /* Asserts the font picked for real body sizes is text-shaped in PHYSICAL
    units on the current screen -- the invariant ST Medium was violating
    (a 12pt document drawn in a cell 4.4x taller than wide). Lives with
@@ -152,6 +157,11 @@ typedef struct {
        of v_fillarea, for a driver whose polygon fill cannot be trusted
        -- SpeedoGDOS's FX80 writes to address 0 on one. */
     short  polys_by_spans;
+    /* Nonzero: plat_draw_mono draws by runs of filled bars
+       (plat_mono_by_runs) instead of a raster copy, for a driver that
+       prints nothing for one -- SpeedoGDOS's FX80. Pictures and the
+       Greek RetroWP draws itself both go through it. */
+    short  mono_by_runs;
 } atari_gc;
 
 #endif /* WP_ATARI_METRICS_INTERNAL_H */

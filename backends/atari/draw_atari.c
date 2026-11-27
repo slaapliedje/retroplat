@@ -142,56 +142,129 @@ static short rgb_to_vdi_color(u8 r, u8 g, u8 b)
    vqt_extent, measuring) in one call, a glyph of ours by itself. */
 
 #define GK_MAX_SCALE 8
-/* A glyph's widest bitmap: 8 pixels a source pixel, and room for an
-   italic lean (up to 7 rows' worth right, 1 left). */
-#define GK_MAX_WORDS ((16 * GK_MAX_SCALE + 15) / 16)
-static u16 g_gk_bits[16 * GK_MAX_SCALE * GK_MAX_WORDS];
+/* The glyph bitmap, drawn a band of rows at a time: 4 KB, room for a
+   screen glyph at 8x whole (128 rows of 8 words) and a band of a
+   printer's bigger ones. */
+#define GK_BUF_WORDS 2048
+static u16 g_gk_bits[GK_BUF_WORDS];
 
-/* The source size and scale for a font whose cell is cellh pixels:
-   8x16 from a 12-pixel cell up, 8x8 below; scaled by whole pixels to
-   the nearest fit. */
-static void gk_scale(short cellh, wp_bool *big, i32 *s)
+/* How a glyph's source pixels land on the device:
+   rows   source rows, 16 (8x16) or 9 (8x8, from the row above the cell);
+   dh     device rows they span;
+   w8     device pixels 8 source columns span (a glyph's advance is
+          src * w8 / 8);
+   base   the device row, from the glyph's top, its baseline is on;
+   px     one source pixel's height: the underline's drop and thickness;
+   bold   how far right the second, emboldening, stroke goes.
+   On a screen every source pixel is s x s device pixels, s whole, so
+   the strokes stay even beside the system font's; on paper the glyph
+   is sized to the face exactly (gk_geometry), as wide as the printer's
+   pixel shape makes the ST's square-pixel 8x16 -- one pixel of
+   difference at 300 dpi is not to be seen, a quarter of a letter too
+   tall is. */
+typedef struct {
+    wp_bool big;
+    i32 rows, dh, w8, base, px, bold;
+} gk_geom;
+
+/* The geometry for a font whose cell is cellh device pixels, on vdi,
+   its face selected. On a screen, 8x16 from a 12-pixel cell up and 8x8
+   below, scaled by whole pixels to the nearest fit. On a printer, 8x16
+   with its capitals (12 source rows) the height of the face's: drawn to
+   the cell, SpeedoGDOS's Swiss had Greek a third taller than its own
+   letters, its cell having room above its capitals that the ST font's
+   does not. The capitals' height is the ascent line (vqt_fontinfo's
+   distances[3]), which GEM defines as their top -- except where a face
+   puts its half, ascent and top lines all at one height, as SpeedoGDOS
+   5's do (23 of a 30-pixel cell at 12 points on the FX80): that is the
+   tallest glyph's top, near the em, and a Latin capital is about three
+   quarters of it (Swiss's digits measured on the FX80's printout, within
+   3%). */
+static void gk_geometry(VdiHdl vdi, short cellh, gk_geom *gm)
 {
-    *big = (wp_bool)(cellh >= 12);
-    *s = *big ? ((i32)cellh + 8) / 16 : ((i32)cellh + 4) / 8;
-    if (*s < 1) *s = 1;
-    if (*s > GK_MAX_SCALE) *s = GK_MAX_SCALE;
+    i32 um_x, um_y, s;
+
+    if (atari_measuring_printer(&um_x, &um_y) && um_x > 0 && um_y > 0 && cellh > 0) {
+        short minade, maxade, maxw, dist[5], eff[3];
+        i32 cap;
+        dist[2] = dist[3] = dist[4] = 0;
+        vqt_fontinfo(vdi, &minade, &maxade, dist, &maxw, eff);
+        if (dist[3] <= 0 || dist[3] >= cellh) cap = ((i32)cellh * 9 + 8) / 16;
+        else if (dist[2] == dist[3] && dist[4] == dist[3]) cap = ((i32)dist[3] * 3 + 2) / 4;
+        else cap = dist[3];
+        gm->big = WP_TRUE;
+        gm->rows = 16;
+        gm->dh = (cap * 16 + 6) / 12;
+        gm->base = (14 * gm->dh + 8) / 16 - 1;
+        /* 8 source columns are half the cell's height on the ST's
+           square pixels: so many microns, in this printer's pixels. */
+        gm->w8 = (gm->dh * um_y + um_x) / (2 * um_x);
+        if (gm->w8 < 1) gm->w8 = 1;
+        if (gm->w8 > 8 * 32) gm->w8 = 8 * 32;
+        gm->px = (gm->dh + 8) / 16;
+        if (gm->px < 1) gm->px = 1;
+        gm->bold = (gm->w8 + 4) / 8;
+        if (gm->bold < 1) gm->bold = 1;
+        return;
+    }
+    gm->big = (wp_bool)(cellh >= 12);
+    s = gm->big ? ((i32)cellh + 8) / 16 : ((i32)cellh + 4) / 8;
+    if (s < 1) s = 1;
+    if (s > GK_MAX_SCALE) s = GK_MAX_SCALE;
+    gm->rows = gm->big ? 16 : 9;
+    gm->dh = gm->rows * s;
+    gm->base = (gm->big ? 14 : 8) * s - 1;
+    gm->w8 = 8 * s;
+    gm->px = s;
+    gm->bold = 1;
 }
 
-/* Glyph gi (0-based) at x, its baseline on y, scaled by s; leaning as
+/* A glyph's advance in device pixels. */
+static i32 gk_adv(const gk_geom *gm, u8 gi)
+{
+    return ((i32)gk_advance[gi] * gm->w8 + 4) / 8;
+}
+
+/* Glyph gi (0-based) at x, its baseline on y, to geometry gm; leaning as
    the VDI's skew leans the font when italic -- a pixel right for every
-   two rows above the baseline, left below it. */
-static void gk_draw(plat_gc *gc, u8 gi, wp_bool big, i32 s, wp_bool italic,
+   two rows above the baseline, left below it. Drawn in bands of rows
+   the bitmap buffer holds. */
+static void gk_draw(plat_gc *gc, u8 gi, const gk_geom *gm, wp_bool italic,
                     i32 x, i32 y, u8 r, u8 g, u8 b)
 {
-    const u8 *src = big ? gk_rows16[gi] : gk_rows8[gi];
-    i32 h = (big ? 16 : 9) * s;
-    i32 w = 8 * s;
-    i32 base = big ? 14 * s - 1 : 8 * s - 1;   /* the output row the baseline is on */
-    i32 left = italic ? s : 0;
-    i32 full = italic ? w + 8 * s : w;
+    const u8 *src = gm->big ? gk_rows16[gi] : gk_rows8[gi];
+    i32 w = gm->w8;                       /* the 8 source columns' width */
+    i32 left = italic ? (gm->dh - gm->base) / 2 + 1 : 0;
+    i32 full = italic ? w + left + gm->base / 2 + 1 : w;
     u32 wpr = (u32)(full + 15) / 16;
-    i32 top = y - base;
-    i32 oy, px;
+    i32 top = y - gm->base;
+    i32 band, oy0, oy, px;
 
-    for (oy = 0; oy < h; oy++) {
-        u16 *row = g_gk_bits + (u32)oy * wpr;
-        u8 bits = src[oy / s];
-        i32 lean = 0;
-        if (italic) {
-            i32 d = base - oy;
-            lean = d >= 0 ? d / 2 : -((1 - d) / 2);
-        }
-        memset(row, 0, wpr * sizeof(u16));
-        if (bits == 0) continue;
-        for (px = 0; px < w; px++) {
-            if (bits & (0x80u >> (u32)(px / s))) {
-                i32 at = px + left + lean;
-                if (at >= 0 && at < full) row[at / 16] |= (u16)(0x8000u >> (u32)(at % 16));
+    if (wpr > GK_BUF_WORDS) return;
+    band = (i32)(GK_BUF_WORDS / wpr);
+    for (oy0 = 0; oy0 < gm->dh; oy0 += band) {
+        i32 n = gm->dh - oy0 < band ? gm->dh - oy0 : band;
+        wp_bool ink = WP_FALSE;
+        for (oy = 0; oy < n; oy++) {
+            u16 *row = g_gk_bits + (u32)oy * wpr;
+            u8 bits = src[(oy0 + oy) * gm->rows / gm->dh];
+            i32 lean = 0;
+            memset(row, 0, wpr * sizeof(u16));
+            if (bits == 0) continue;
+            ink = WP_TRUE;
+            if (italic) {
+                i32 d = gm->base - (oy0 + oy);
+                lean = d >= 0 ? d / 2 : -((1 - d) / 2);
+            }
+            for (px = 0; px < w; px++) {
+                if (bits & (0x80u >> (u32)(px * 8 / w))) {
+                    i32 at = px + left + lean;
+                    if (at >= 0 && at < full) row[at / 16] |= (u16)(0x8000u >> (u32)(at % 16));
+                }
             }
         }
+        if (ink) (void)plat_draw_mono(gc, x - left, top + oy0, full, n, g_gk_bits, wpr, r, g, b);
     }
-    (void)plat_draw_mono(gc, x - left, top, full, h, g_gk_bits, wpr, r, g, b);
 }
 
 /* The width vqt_extent gives text, in pixels -- upright: a slanted
@@ -223,13 +296,12 @@ i32 atari_text_run(VdiHdl vdi, plat_gc *gc, const atari_font *af, short cellh,
     char seg[128];
     u32 seg_n = 0, pos = 0;
     i32 x0 = x;
-    wp_bool big;
-    i32 s;
+    gk_geom gm;
     wp_bool bold = (wp_bool)((af->style_flags & PLAT_STYLE_BOLD) != 0);
     wp_bool under = (wp_bool)((af->style_flags & PLAT_STYLE_UNDERLINE) != 0);
     wp_bool italic = (wp_bool)((af->style_flags & PLAT_STYLE_ITALIC) != 0);
 
-    gk_scale(cellh, &big, &s);
+    gk_geometry(vdi, cellh, &gm);
 
 #define GK_FLUSH() do { \
         if (seg_n > 0) { \
@@ -259,18 +331,18 @@ i32 atari_text_run(VdiHdl vdi, plat_gc *gc, const atari_font *af, short cellh,
             i32 w, cx;
             GK_FLUSH();
             if (e->pre != 0) {
-                i32 pw = (i32)gk_advance[e->pre - 1] * s;
-                if (gc != NULL) gk_draw(gc, (u8)(e->pre - 1), big, s, italic, x, y, r, g, b);
-                if (gc != NULL && under) (void)plat_fill_rect(gc, x, y + s, pw, s, r, g, b);
+                i32 pw = gk_adv(&gm, (u8)(e->pre - 1));
+                if (gc != NULL) gk_draw(gc, (u8)(e->pre - 1), &gm, italic, x, y, r, g, b);
+                if (gc != NULL && under) (void)plat_fill_rect(gc, x, y + gm.px, pw, gm.px, r, g, b);
                 x += pw;
             }
             cx = x;
             if (e->glyph != 0) {
-                w = (i32)gk_advance[e->glyph - 1] * s + (bold ? 1 : 0);
+                w = gk_adv(&gm, (u8)(e->glyph - 1)) + (bold ? gm.bold : 0);
                 if (gc != NULL) {
-                    gk_draw(gc, (u8)(e->glyph - 1), big, s, italic, x, y, r, g, b);
-                    if (bold) gk_draw(gc, (u8)(e->glyph - 1), big, s, italic, x + 1, y, r, g, b);
-                    if (under) (void)plat_fill_rect(gc, x, y + s, w, s, r, g, b);
+                    gk_draw(gc, (u8)(e->glyph - 1), &gm, italic, x, y, r, g, b);
+                    if (bold) gk_draw(gc, (u8)(e->glyph - 1), &gm, italic, x + gm.bold, y, r, g, b);
+                    if (under) (void)plat_fill_rect(gc, x, y + gm.px, w, gm.px, r, g, b);
                 }
             } else {
                 char one[2];
@@ -280,9 +352,9 @@ i32 atari_text_run(VdiHdl vdi, plat_gc *gc, const atari_font *af, short cellh,
                 if (gc != NULL) v_gtext(vdi, (short)x, (short)y, one);
             }
             if (e->over != 0 && gc != NULL) {
-                i32 ox = cx + (w - 8 * s) / 2;
-                gk_draw(gc, (u8)(e->over - 1), big, s, italic, ox, y, r, g, b);
-                if (bold) gk_draw(gc, (u8)(e->over - 1), big, s, italic, ox + 1, y, r, g, b);
+                i32 ox = cx + (w - gm.w8) / 2;
+                gk_draw(gc, (u8)(e->over - 1), &gm, italic, ox, y, r, g, b);
+                if (bold) gk_draw(gc, (u8)(e->over - 1), &gm, italic, ox + gm.bold, y, r, g, b);
             }
             x = cx + w;
         }
@@ -580,7 +652,8 @@ wp_status plat_draw_image(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
    form, and the rows are already the VDI's words (big-endian, bit 15
    leftmost) on the ST. Clipped by hand to the caller's rectangle --
    raster copies ignore vs_clip. gem4xe's words are not the ST's byte
-   order, so it draws run by run instead. */
+   order, so it draws run by run instead, as does a gc that asks for runs
+   (atari_gc.mono_by_runs: a printer that prints no raster copy). */
 wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
                          const u16 *rows, u32 row_words, u8 r, u8 g, u8 b)
 {
@@ -594,6 +667,7 @@ wp_status plat_draw_mono(plat_gc *gc, i32 x, i32 y, i32 w, i32 h,
     i32 sx = 0, sy = 0;
 
     if (agc == NULL || rows == NULL || row_words == 0) return WP_ERR;
+    if (agc->mono_by_runs) return plat_mono_by_runs(gc, x, y, w, h, rows, row_words, r, g, b);
     if (w > (i32)(row_words * 16u)) w = (i32)(row_words * 16u);
     if (agc->clip_on) {
         i32 cx1 = agc->clip[0], cy1 = agc->clip[1], cx2 = agc->clip[2], cy2 = agc->clip[3];
